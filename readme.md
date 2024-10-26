@@ -127,4 +127,12 @@ Add this to your MQTT sensor configuration
     state_topic: "Astro/Skytatus"
     value_template: "{{ value_json.confidence_score | float * 100 }}"
     unit_of_measurement: "%"
+
+- name: "Cloud Detection Time"
+    unique_id: dfhfyuyjghjhcjzf7
+    icon: mdi:exclamation
+    state_topic: "Astro/SimpleCloudDetect"
+    value_template: "{{ value_json['Detection Time (Seconds)'] }}"
+    unit_of_measurement: "S"
+
 ```
