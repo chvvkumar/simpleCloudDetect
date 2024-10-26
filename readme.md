@@ -1,6 +1,6 @@
 
 
-## A simple Keras model based Cloud Detection for AllSky Cameras
+## A simple Machine Learning based Cloud Detection for AllSky Cameras
 
   This python script will take an image from an AllSky camera, run it through a machine learning model and output cloud status to Home Assistant
 
