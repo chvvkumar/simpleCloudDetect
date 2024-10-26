@@ -1,0 +1,5 @@
+0 Clear
+1 Mostly Cloudy
+2 Overcast
+3 Rain
+4 Whisps of clouds

@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloud Detection Service
+After=network.target
+
+[Service]
+ExecStart=/home/pi/git/simpleCloudDetect/env/bin/python /home/pi/git/simpleCloudDetect/detect.py
+WorkingDirectory=/home/pi/git/simpleCloudDetect
+Environment="PATH=/home/pi/git/simpleCloudDetect/env/bin"
+Restart=always
+User=pi
+Group=pi
+
+[Install]
+WantedBy=multi-user.target
