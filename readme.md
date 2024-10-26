@@ -43,6 +43,16 @@ pip  install  --upgrade  pip
 pip  install  -r  requirements.txt
 ```
 
+Update the script `detect.py` with your own settings for these parameters:
+```python
+# Define parameters
+image_url = "http://localhost/current/resized/image.jpg"
+broker = "192.168.1.250"
+port = 1883
+topic = "Astro/SimpleCloudDetect"
+detect_interval = 60
+```
+
 ## Training your model
 
 The model I use is included in this repo for testing but it is highly recommended to train your own model with your data from your AllSky camera to get a more reliable prediction.
