@@ -110,3 +110,21 @@ Oct 26 10:13:13 allskypi5 python[5694]: Class: Clear Confidence Score: 1.0 Elaps
 Oct 26 10:13:13 allskypi5 python[5694]: Published data to MQTT topic: Astro/SimpleCloudDetect Data: {"class_name": "Clear", "confidence_score": 100.0, "Detection Time (Seconds)": 0.11}
 Oct 26 10:13:13 allskypi5 python[5694]: [193B blob data]
 ```
+
+## Add sensors to Home Assistant
+
+Add this to your MQTT sensor configuration
+```yaml
+- name: "Cloud Status"
+    unique_id: DXWiwkjvhjhzf7KGwAFDAo7K
+    icon: mdi:clouds
+    state_topic: "Astro/Skytatus"
+    value_template: "{{ value_json.class_name }}"
+
+- name: "Cloud Status Confidence"
+    unique_id: tdrgfwkjvhjhzf7KGwAFDAo7K
+    icon: mdi:exclamation
+    state_topic: "Astro/Skytatus"
+    value_template: "{{ value_json.confidence_score | float * 100 }}"
+    unit_of_measurement: "%"
+```
