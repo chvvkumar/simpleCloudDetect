@@ -6,10 +6,20 @@
 
 ## Screenshots
 
+Clear Skies
 ![alt text](/images/HA2.png)
 
-![alt text](/images/HA1.png)
+Majority Clouds
 
+![](/images/Mostly%20Cloudy.png)
+
+Wisps of Clouds
+
+![](/images/wisps.png)
+
+Overcast
+
+![](/images/Overcast.png)
 
 ## Overview of operations
 
