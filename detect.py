@@ -13,7 +13,7 @@ import time
 # Define parameters
 image_url = os.environ['IMAGE_URL']
 broker = os.environ['MQTT_BROKER']
-port = os.environ['MQTT_PORT']
+port = int(os.getenv("MQTT_PORT"))
 topic = os.environ['MQTT_TOPIC']
 detect_interval =  os.environ['DETECT_INTERVAL']
 
