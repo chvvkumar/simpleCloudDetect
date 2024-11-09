@@ -16,8 +16,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code into the container
 COPY . .
 
-# Expose the port that the MQTT broker will use
-EXPOSE 1883
-
 # Run the application
 CMD ["python", "detect.py"]
