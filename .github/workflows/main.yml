@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - "main"
+    paths-ignore:
+      - 'readme.md'
+      - 'images/**'
 
 jobs:
   build:
@@ -25,19 +28,15 @@ jobs:
           push: false
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
  
-      # Slim it!
-      - uses: kitabisa/docker-slim-action@v1
-        env:
-          DSLIM_HTTP_PROBE: false
-        with:
-          target: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
-          tag: "slim"
-          
-      # Dump the report
-      - run: echo "${REPORT}"
-        env:
-          REPORT: ${{ steps.slim.outputs.report }}
-
       # Push to the registry
       - run: docker image push ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect --all-tags
+
+      # Sync readme
+      - name: Sync
+        uses: ms-jpq/sync-dockerhub-readme@v1
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect
+          readme: "./readme.md"
 
