@@ -23,9 +23,9 @@ Overcast
 
 ## Docker (preferred method)
 
-
+docker run:
 ```shell
-docker pull chvvkumar/simpleclouddetect
+docker pull chvvkumar/simpleclouddetect:latest
 
 docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://localhost/current/resized/image.jpg" \
@@ -33,9 +33,22 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
-  simple-cloud-detect \
+  chvvkumar/simpleclouddetect:latest \
 ```
+docker compose:
 
+```shell
+    simpleclouddetect:
+        container_name: simple-cloud-detect
+        network_mode: host
+        environment:
+            - IMAGE_URL=http://localhost/current/resized/image.jpg
+            - MQTT_BROKER=192.168.1.250
+            - MQTT_PORT=1883
+            - MQTT_TOPIC=Astro/DOCKERSimpleCloudDetect
+            - DETECT_INTERVAL=15
+        image: chvvkumar/simpleclouddetect:latest
+```
 ## Manual install and run Overview of operations
 
 -   Ensure Python and Python-venv are version 3.11
