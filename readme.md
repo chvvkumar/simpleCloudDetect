@@ -21,10 +21,26 @@ Overcast
 
 ![](/images/Overcast.png)
 
-## Overview of operations
+## Docker (preferred method)
+
+
+```shell
+docker pull chvvkumar/simpleclouddetect
+
+docker run -d --name simple-cloud-detect --network=host \
+  -e IMAGE_URL="http://localhost/current/resized/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_PORT="1883" \
+  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e DETECT_INTERVAL="60" \
+  simple-cloud-detect \
+```
+
+## Manual install and run Overview of operations
 
 -   Ensure Python and Python-venv are version 3.11
 -   Clone repo
+-   Update variables
 -   Create venv and activate it
 -   Install dependencies from requirements.txt
 -   Train your model (my model is included but YMMV with it) and copy to the project firectory
