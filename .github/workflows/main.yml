@@ -23,14 +23,14 @@ jobs:
       - uses: docker/build-push-action@v4
         with:
           push: false
-          tags: chvvkumar/simpleclouddetect:latest
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
  
       # Slim it!
       - uses: kitabisa/docker-slim-action@v1
         env:
           DSLIM_HTTP_PROBE: false
         with:
-          target: chvvkumar/simpleclouddetect:latest
+          target: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
           tag: "slim"
           
       # Dump the report
@@ -39,11 +39,5 @@ jobs:
           REPORT: ${{ steps.slim.outputs.report }}
 
       # Push to the registry
-      - run: docker image push chvvkumar/simpleclouddetect --all-tags
-      
-      # -
-      #   name: Build and push
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     push: true
-      #     tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
+      - run: docker image push ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect --all-tags
+
