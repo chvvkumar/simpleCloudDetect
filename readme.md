@@ -38,7 +38,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
-  chvvkumar/simpleclouddetect:latest \
+  chvvkumar/simpleclouddetect:latest
 ```
 docker compose:
 
