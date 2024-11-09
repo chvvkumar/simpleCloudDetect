@@ -23,6 +23,12 @@ Overcast
 
 ## Docker (preferred method)
 
+![Docker build status](https://img.shields.io/github/actions/workflow/status/chvvkumar/simpleclouddetect/main.yml
+) ![](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect
+) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect
+) 
+
+
 docker run:
 ```shell
 docker pull chvvkumar/simpleclouddetect:latest
