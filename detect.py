@@ -11,11 +11,11 @@ import os
 import time
 
 # Define parameters
-image_url = "https://allsky.challa.co:1982/current/resized/image.jpg"
-broker = "192.168.1.250"
-port = 1883
-topic = "Astro/SimpleCloudDetect"
-detect_interval = 60
+image_url = os.environ['IMAGE_URL']
+broker = os.environ['MQTT_BROKER']
+port = os.environ['MQTT_PORT']
+topic = os.environ['MQTT_TOPIC']
+detect_interval =  os.environ['DETECT_INTERVAL']
 
 # Load the model and class names
 model = load_model("keras_model.h5", compile=False) # Load the model
