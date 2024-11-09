@@ -28,12 +28,12 @@ jobs:
           push: true
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
 
-      # Sync readme
-      - name: Sync
-        uses: ms-jpq/sync-dockerhub-readme@v1
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect
-          readme: ${{ github.workspace }}/readme.md
+      # # Sync readme
+      # - name: Sync
+      #   uses: ms-jpq/sync-dockerhub-readme@v1
+      #   with:
+      #     username: ${{ vars.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+      #     repository: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect
+      #     readme: ${{ github.workspace }}/readme.md
 
