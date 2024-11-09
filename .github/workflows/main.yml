@@ -18,9 +18,32 @@ jobs:
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      -
-        name: Build and push
-        uses: docker/build-push-action@v6
+
+      # Build the Docker image first
+      - uses: docker/build-push-action@v4
         with:
-          push: true
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
+          push: false
+          tags: ${{ github.repository }}:latest
+ 
+      # Slim it!
+      - uses: kitabisa/docker-slim-action@v1
+        env:
+          DSLIM_HTTP_PROBE: false
+        with:
+          target: ${{ github.repository }}:latest
+          tag: "slim"
+          
+      # Dump the report
+      - run: echo "${REPORT}"
+        env:
+          REPORT: ${{ steps.slim.outputs.report }}
+
+      # Push to the registry
+      - run: docker image push "${{ github.repository }}" --all-tags
+      
+      # -
+      #   name: Build and push
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     push: true
+      #     tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
