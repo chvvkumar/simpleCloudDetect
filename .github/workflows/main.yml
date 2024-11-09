@@ -35,5 +35,5 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect
-          readme: "./readme.md"
+          readme: "readme.md"
 
