@@ -11,11 +11,11 @@ import os
 import time
 
 # Define parameters
-image_url = "http://localhost/current/resized/image.jpg"
-broker = "192.168.1.250"
-port = 1883
-topic = "Astro/SimpleCloudDetect"
-detect_interval = 60
+image_url = os.getenv("IMAGE_URL")
+broker = os.getenv("BROKER")
+port = int(os.getenv("PORT"))
+topic = os.getenv("TOPIC")
+detect_interval = int(os.getenv("DETECT_INTERVAL"))
 
 # Load the model and class names
 model = load_model("keras_model.h5", compile=False) # Load the model
