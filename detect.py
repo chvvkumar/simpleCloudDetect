@@ -11,7 +11,7 @@ import os
 import time
 
 # Define parameters
-image_url = "http://localhost/current/resized/image.jpg"
+image_url = "https://allsky.challa.co:1982/current/resized/image.jpg"
 broker = "192.168.1.250"
 port = 1883
 topic = "Astro/SimpleCloudDetect"
