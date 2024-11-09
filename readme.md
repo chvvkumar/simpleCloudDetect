@@ -45,7 +45,7 @@ docker compose:
             - IMAGE_URL=http://localhost/current/resized/image.jpg
             - MQTT_BROKER=192.168.1.250
             - MQTT_PORT=1883
-            - MQTT_TOPIC=Astro/DOCKERSimpleCloudDetect
+            - MQTT_TOPIC=Astro/SimpleCloudDetect
             - DETECT_INTERVAL=15
         image: chvvkumar/simpleclouddetect:latest
 ```
