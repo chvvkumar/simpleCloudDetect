@@ -51,7 +51,7 @@ docker compose:
             - MQTT_BROKER=192.168.1.250
             - MQTT_PORT=1883
             - MQTT_TOPIC=Astro/SimpleCloudDetect
-            - DETECT_INTERVAL=15
+            - DETECT_INTERVAL=60
         image: chvvkumar/simpleclouddetect:latest
 ```
 ## Manual install and run Overview of operations
