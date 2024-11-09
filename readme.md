@@ -28,7 +28,6 @@ Overcast
 ) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect
 ) 
 
-
 docker run:
 ```shell
 docker pull chvvkumar/simpleclouddetect:latest
