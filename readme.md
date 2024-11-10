@@ -23,10 +23,15 @@ Overcast
 
 ## Docker (preferred method)
 
-![Docker build status](https://img.shields.io/github/actions/workflow/status/chvvkumar/simpleclouddetect/main.yml
-) ![](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect
-) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect
-) 
+DEV Branch
+
+[![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) ![Docker Image Size (dev)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/dev?style=flat&logo=docker&logoSize=auto)
+
+Main branch
+
+[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=latest) 
+
+
 
 docker run:
 ```shell
