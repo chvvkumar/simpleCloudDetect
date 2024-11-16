@@ -8,10 +8,10 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install the dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -U pip & pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container
 COPY . .
 
-# Run the application
-CMD ["python", "detect.py"]
+# Run convert.py first, then detect.py
+CMD ["sh", "-c", "python convert.py && python detect.py"]
