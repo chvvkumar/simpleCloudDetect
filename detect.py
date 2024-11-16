@@ -9,6 +9,7 @@ import requests
 from io import BytesIO
 import os
 import time
+import urllib.parse
 
 # Define parameters
 image_url = os.environ['IMAGE_URL']
@@ -32,8 +33,15 @@ print("Connected to MQTT broker at:", broker, "on port:", port, "with topic:", t
 # Function to detect an object in an image and publish the result to an MQTT topic
 def detect(image_url, topic, model, class_names):
     # Get the image from the URL
-    response = requests.get(image_url)
-    image = Image.open(BytesIO(response.content)).convert("RGB")
+    if image_url.startswith("file://"):
+        # Extract the file path from the URL and open the file
+        file_path = urllib.parse.urlparse(image_url).path
+        with open(file_path, "rb") as file:
+            image = Image.open(file).convert("RGB")
+    else:
+        # Load the image from a URL
+        response = requests.get(image_url)
+        image = Image.open(BytesIO(response.content)).convert("RGB")
 
     # Start the timer
     start_time = time.time()
