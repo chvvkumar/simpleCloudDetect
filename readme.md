@@ -45,6 +45,19 @@ docker run -d --name simple-cloud-detect --network=host \
   -e DETECT_INTERVAL="60" \
   chvvkumar/simpleclouddetect:latest
 ```
+
+As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
+```shell
+docker run -d --name simple-cloud-detect --network=host \
+  -v $HOME/path/to/image.jpg:/tmp/image.jpg
+  -e IMAGE_URL="file:///tmp/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_PORT="1883" \
+  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e DETECT_INTERVAL="60" \
+  chvvkumar/simpleclouddetect:latest
+```
+
 docker compose:
 
 ```shell
@@ -131,6 +144,21 @@ Run the script to run detection once to test ecverything is working as expected.
 ```shell
 python3  detect.py
 ```
+
+If using docker, the container takes care of the conversion step automatically.
+You only need to mount the model files as a volume:
+```shell
+docker run -d --name simple-cloud-detect --network=host \
+  -v $HOME/path/to/keras_model.h5:/app/keras_model.h5 \
+  -v $HOME/path/to/lables.txt:/app/labels.txt \
+  -e IMAGE_URL="http://localhost/current/resized/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_PORT="1883" \
+  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e DETECT_INTERVAL="60" \
+  chvvkumar/simpleclouddetect:latest
+```
+
 
 ## Setup systemd service to automatically start the script on boot and run as a service
 
