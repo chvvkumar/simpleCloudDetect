@@ -21,7 +21,7 @@ Overcast
 
 ![](/images/Overcast.png)
 
-## Docker (preferred method)
+## Docker (preferred method, x86 only at the moment)
 
 DEV Branch
 
