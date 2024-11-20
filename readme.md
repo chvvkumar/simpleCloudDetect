@@ -39,25 +39,27 @@ docker pull chvvkumar/simpleclouddetect:latest
 
 # When using an  image from a URL
 docker run -d --name simple-cloud-detect --network=host \
-  -e IMAGE_URL="http://localhost/current/resized/image.jpg" \
+  -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
-  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e MQTT_TOPIC="Astro/FEATURESimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
-  -e MODEL_PATH="/docker/simpleclouddetect/keras_model.h5" \
-  chvvkumar/simpleclouddetect:latest
+  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
+  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
+  simpleclouddetect:feature_custommodelfile
 ```
 As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
 ```shell
 # When using an  image from a local file path
 docker run -d --name simple-cloud-detect --network=host \
-  -v $HOME/path/to/image.jpg:/tmp/image.jpg
+  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
+  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
+  -v $HOME/path/to/image.jpg:/tmp/image.jpg \
   -e IMAGE_URL="file:///tmp/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
-  -e MODEL_PATH="/docker/simpleclouddetect/keras_model.h5" \
   chvvkumar/simpleclouddetect:latest
 ```
 
@@ -69,12 +71,15 @@ docker compose:
         container_name: simple-cloud-detect
         network_mode: host
         environment:
-          - IMAGE_URL=http://localhost/current/resized/image.jpg
+          - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
           - MQTT_BROKER=192.168.1.250
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
           - DETECT_INTERVAL=60
-          - /docker/simpleclouddetect/keras_model.h5:/docker/simpleclouddetect/keras_model.h5
+        volumes:
+          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+        restart: unless-stopped
         image: chvvkumar/simpleclouddetect:latest
 
 # When using an  image from a local path
@@ -89,7 +94,9 @@ docker compose:
           - DETECT_INTERVAL=60
         volumes:
           - '$HOME/path/to/image.jpg:/tmp/image.jpg'
-          - /docker/simpleclouddetect/keras_model.h5:/docker/simpleclouddetect/keras_model.h5
+          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+        restart: unless-stopped
         image: chvvkumar/simpleclouddetect:latest
 ```
 ## Manual install and run Overview of operations
