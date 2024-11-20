@@ -31,6 +31,10 @@ Main branch
 
 [![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls) 
 
+CHANGES:
+- 2024-11-20: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
+- 2024-11-19: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8 .
+- 2024-10-26: Initial release with basic cloud detection functionality.
 
 
 docker run:
