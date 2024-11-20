@@ -50,7 +50,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e DETECT_INTERVAL="60" \
   -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
-  simpleclouddetect:feature_custommodelfile
+  chvvkumar/simpleclouddetect:latest
 ```
 As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
 ```shell
