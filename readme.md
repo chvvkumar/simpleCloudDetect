@@ -44,7 +44,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
-  -e MODEL_PATH="/path/on/host/keras_model.h5" \
+  -e MODEL_PATH="/docker/simpleclouddetect/keras_model.h5" \
   chvvkumar/simpleclouddetect:latest
 ```
 As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
@@ -57,7 +57,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
-  -e MODEL_PATH="/path/on/host/keras_model.h5" \
+  -e MODEL_PATH="/docker/simpleclouddetect/keras_model.h5" \
   chvvkumar/simpleclouddetect:latest
 ```
 
@@ -74,7 +74,7 @@ docker compose:
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
           - DETECT_INTERVAL=60
-          - /path/on/host/keras_model.h5:/docker/simpleclouddetect/keras_model.h5
+          - /docker/simpleclouddetect/keras_model.h5:/docker/simpleclouddetect/keras_model.h5
         image: chvvkumar/simpleclouddetect:latest
 
 # When using an  image from a local path
@@ -89,7 +89,7 @@ docker compose:
           - DETECT_INTERVAL=60
         volumes:
           - '$HOME/path/to/image.jpg:/tmp/image.jpg'
-          - /path/on/host/keras_model.h5:/docker/simpleclouddetect/keras_model.h5
+          - /docker/simpleclouddetect/keras_model.h5:/docker/simpleclouddetect/keras_model.h5
         image: chvvkumar/simpleclouddetect:latest
 ```
 ## Manual install and run Overview of operations
