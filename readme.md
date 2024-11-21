@@ -46,7 +46,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
-  -e MQTT_TOPIC="Astro/FEATURESimpleCloudDetect" \
+  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
   -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
