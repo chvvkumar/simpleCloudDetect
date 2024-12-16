@@ -13,14 +13,16 @@ import urllib.parse
 
 # Define parameters
 image_url = os.environ['IMAGE_URL']
+model_path = os.getenv('MODEL_PATH', 'keras_model.h5')
+label_path = os.getenv('LABEL_PATH', 'labels.txt')
 broker = os.environ['MQTT_BROKER']
 port = int(os.getenv("MQTT_PORT"))
 topic = os.environ['MQTT_TOPIC']
 detect_interval = int(os.environ['DETECT_INTERVAL'])
 
 # Load the model and class names
-model = load_model("keras_model.h5", compile=False) # Load the model
-class_names = open("labels.txt", "r").readlines() # Load the class names
+model = load_model(model_path, compile=False)  # Load the model
+class_names = open(label_path, "r").readlines() # Load the class names
 
 # Clear the console
 os.system('cls' if os.name == 'nt' else 'clear')

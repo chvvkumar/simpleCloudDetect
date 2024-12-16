@@ -8,10 +8,10 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install the dependencies
-RUN pip install -U pip & pip install --no-cache-dir -r requirements.txt
+RUN pip install -U pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code into the container
-COPY . .
+# Copy the rest of the application code into the container, excluding keras_model.h5 and labels.txt
+COPY convert.py detect.py ./
 
 # Run convert.py first, then detect.py
 CMD ["sh", "-c", "python convert.py && python detect.py"]

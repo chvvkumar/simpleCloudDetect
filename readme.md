@@ -21,7 +21,7 @@ Overcast
 
 ![](/images/Overcast.png)
 
-## Docker (preferred method)
+## Docker (preferred method, x86 only at the moment)
 
 DEV Branch
 
@@ -31,6 +31,10 @@ Main branch
 
 [![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls) 
 
+CHANGES:
+- 2024-11-20: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
+- 2024-11-19: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8 .
+- 2024-10-26: Initial release with basic cloud detection functionality.
 
 
 docker run:
@@ -39,18 +43,22 @@ docker pull chvvkumar/simpleclouddetect:latest
 
 # When using an  image from a URL
 docker run -d --name simple-cloud-detect --network=host \
-  -e IMAGE_URL="http://localhost/current/resized/image.jpg" \
+  -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
   -e DETECT_INTERVAL="60" \
+  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
+  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
   chvvkumar/simpleclouddetect:latest
 ```
 As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
 ```shell
 # When using an  image from a local file path
 docker run -d --name simple-cloud-detect --network=host \
-  -v $HOME/path/to/image.jpg:/tmp/image.jpg
+  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
+  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
+  -v $HOME/path/to/image.jpg:/tmp/image.jpg \
   -e IMAGE_URL="file:///tmp/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
@@ -67,11 +75,15 @@ docker compose:
         container_name: simple-cloud-detect
         network_mode: host
         environment:
-          - IMAGE_URL=http://localhost/current/resized/image.jpg
+          - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
           - MQTT_BROKER=192.168.1.250
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
           - DETECT_INTERVAL=60
+        volumes:
+          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+        restart: unless-stopped
         image: chvvkumar/simpleclouddetect:latest
 
 # When using an  image from a local path
@@ -86,6 +98,9 @@ docker compose:
           - DETECT_INTERVAL=60
         volumes:
           - '$HOME/path/to/image.jpg:/tmp/image.jpg'
+          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+        restart: unless-stopped
         image: chvvkumar/simpleclouddetect:latest
 ```
 ## Manual install and run Overview of operations
