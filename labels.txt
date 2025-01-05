@@ -2,4 +2,5 @@
 1 Mostly Cloudy
 2 Overcast
 3 Rain
-4 Whisps of clouds
+4 Snow
+5 Wisps of clouds
