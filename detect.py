@@ -19,6 +19,8 @@ broker = os.environ['MQTT_BROKER']
 port = int(os.getenv("MQTT_PORT"))
 topic = os.environ['MQTT_TOPIC']
 detect_interval = int(os.environ['DETECT_INTERVAL'])
+mqtt_username = os.getenv('MQTT_USERNAME')
+mqtt_password = os.getenv('MQTT_PASSWORD')
 
 # Load the model and class names
 model = load_model(model_path, compile=False)  # Load the model
@@ -29,6 +31,8 @@ os.system('cls' if os.name == 'nt' else 'clear')
 
 # Connect to the MQTT broker
 client = mqtt.Client()
+if mqtt_username and mqtt_password:
+    client.username_pw_set(mqtt_username, mqtt_password)
 client.connect(broker, port)
 print("Connected to MQTT broker at:", broker, "on port:", port, "with topic:", topic)
 
