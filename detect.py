@@ -1,110 +1,182 @@
-#!/home/pi/git/simpleCloudDetect/env/bin/python
+#!/usr/bin/env python3
 
-from keras.models import load_model  # TensorFlow is required for Keras to work
-from PIL import Image, ImageOps  # Install pillow instead of PIL
-import numpy as np
-import json
-import paho.mqtt.client as mqtt
-import requests
-from io import BytesIO
+import logging
 import os
 import time
+import json
 import urllib.parse
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
-# Define parameters
-image_url = os.environ['IMAGE_URL']
-model_path = os.getenv('MODEL_PATH', 'keras_model.h5')
-label_path = os.getenv('LABEL_PATH', 'labels.txt')
-broker = os.environ['MQTT_BROKER']
-port = int(os.getenv("MQTT_PORT"))
-topic = os.environ['MQTT_TOPIC']
-detect_interval = int(os.environ['DETECT_INTERVAL'])
-mqtt_username = os.getenv('MQTT_USERNAME')
-mqtt_password = os.getenv('MQTT_PASSWORD')
+import numpy as np
+import paho.mqtt.client as mqtt
+import requests
+from PIL import Image, ImageOps
+from keras.models import load_model
 
-# Load the model and class names
-model = load_model(model_path, compile=False)  # Load the model
-class_names = open(label_path, "r").readlines() # Load the class names
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Clear the console
-os.system('cls' if os.name == 'nt' else 'clear')
+@dataclass
+class Config:
+    """Configuration class to hold all environment variables"""
+    image_url: str
+    model_path: str
+    label_path: str
+    broker: str
+    port: int
+    topic: str
+    detect_interval: int
+    mqtt_username: Optional[str]
+    mqtt_password: Optional[str]
 
-# Connect to the MQTT broker
-client = mqtt.Client()
-if mqtt_username and mqtt_password:
-    client.username_pw_set(mqtt_username, mqtt_password)
-client.connect(broker, port)
-print("Connected to MQTT broker at:", broker, "on port:", port, "with topic:", topic)
+    @classmethod
+    def from_env(cls) -> 'Config':
+        """Create Config from environment variables with validation"""
+        required_vars = ['IMAGE_URL', 'MQTT_BROKER', 'MQTT_TOPIC', 'DETECT_INTERVAL']
+        missing = [var for var in required_vars if not os.getenv(var)]
+        if missing:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        
+        return cls(
+            image_url=os.environ['IMAGE_URL'],
+            model_path=os.getenv('MODEL_PATH', 'keras_model.h5'),
+            label_path=os.getenv('LABEL_PATH', 'labels.txt'),
+            broker=os.environ['MQTT_BROKER'],
+            port=int(os.getenv('MQTT_PORT', '1883')),
+            topic=os.environ['MQTT_TOPIC'],
+            detect_interval=int(os.environ['DETECT_INTERVAL']),
+            mqtt_username=os.getenv('MQTT_USERNAME'),
+            mqtt_password=os.getenv('MQTT_PASSWORD')
+        )
 
-# Function to detect an object in an image and publish the result to an MQTT topic
-def detect(image_url, topic, model, class_names):
-    # Get the image from the URL
-    if image_url.startswith("file://"):
-        # Extract the file path from the URL and open the file
-        file_path = urllib.parse.urlparse(image_url).path
-        with open(file_path, "rb") as file:
-            image = Image.open(file).convert("RGB")
-    else:
-        # Load the image from a URL
-        response = requests.get(image_url)
-        image = Image.open(BytesIO(response.content)).convert("RGB")
+class CloudDetector:
+    """Main class for cloud detection operations"""
+    def __init__(self, config: Config):
+        self.config = config
+        self.model = self._load_model()
+        self.class_names = self._load_class_names()
+        self.mqtt_client = self._setup_mqtt()
+        
+    def _load_model(self):
+        """Load and return the Keras model"""
+        try:
+            return load_model(self.config.model_path, compile=False)
+        except Exception as e:
+            logger.error(f"Failed to load model from {self.config.model_path}: {e}")
+            raise
 
-    # Start the timer
-    start_time = time.time()
+    def _load_class_names(self):
+        """Load and return class names from the labels file"""
+        try:
+            with open(self.config.label_path, "r") as f:
+                return f.readlines()
+        except Exception as e:
+            logger.error(f"Failed to load labels from {self.config.label_path}: {e}")
+            raise
 
-    # resizing the image to be at least 224x224 and then cropping from the center
-    size = (224, 224)
-    image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
+    def _setup_mqtt(self):
+        """Setup and return MQTT client"""
+        client = mqtt.Client()
+        if self.config.mqtt_username and self.config.mqtt_password:
+            client.username_pw_set(self.config.mqtt_username, self.config.mqtt_password)
+        
+        try:
+            client.connect(self.config.broker, self.config.port)
+            logger.info(f"Connected to MQTT broker at {self.config.broker}:{self.config.port}")
+            return client
+        except Exception as e:
+            logger.error(f"Failed to connect to MQTT broker: {e}")
+            raise
 
-    # turn the image into a numpy array
-    image_array = np.asarray(image)
+    def _load_image(self, image_url: str) -> Image.Image:
+        """Load and return image from URL or file"""
+        try:
+            if image_url.startswith("file://"):
+                file_path = Path(urllib.parse.urlparse(image_url).path)
+                return Image.open(file_path).convert("RGB")
+            else:
+                response = requests.get(image_url, timeout=10)
+                response.raise_for_status()
+                return Image.open(requests.get(image_url, timeout=10).content).convert("RGB")
+        except Exception as e:
+            logger.error(f"Failed to load image from {image_url}: {e}")
+            raise
 
-    # Normalize the image
-    normalized_image_array = (image_array.astype(np.float32) / 127.5) - 1
+    def _preprocess_image(self, image: Image.Image) -> np.ndarray:
+        """Preprocess image for model input"""
+        # Resize and normalize image
+        image = ImageOps.fit(image, (224, 224), Image.Resampling.LANCZOS)
+        image_array = np.asarray(image)
+        normalized_array = (image_array.astype(np.float32) / 127.5) - 1
+        return np.expand_dims(normalized_array, axis=0)
 
-    # Create the array of the right shape to feed into the keras model
-    data = np.ndarray(shape=(1, 224, 224, 3), dtype=np.float32) # 3 is the number of channels (RGB) in the image
-    data[0] = normalized_image_array # Load the image into the array
+    def detect(self) -> dict:
+        """Perform cloud detection on an image"""
+        start_time = time.time()
+        
+        try:
+            # Load and preprocess image
+            image = self._load_image(self.config.image_url)
+            preprocessed_image = self._preprocess_image(image)
+            
+            # Make prediction
+            prediction = self.model.predict(preprocessed_image, verbose=0)
+            index = np.argmax(prediction)
+            class_name = self.class_names[index].strip()[2:]  # Remove index and newline
+            confidence_score = float(prediction[0][index])
+            
+            elapsed_time = time.time() - start_time
+            
+            result = {
+                "class_name": class_name,
+                "confidence_score": round(confidence_score * 100, 2),
+                "Detection Time (Seconds)": round(elapsed_time, 2)
+            }
+            
+            logger.info(f"Detection: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Detection failed: {e}")
+            raise
 
-    # Predicts the model
-    prediction = model.predict(data)
-    index = np.argmax(prediction)
-    class_name = class_names[index].strip() # Remove the newline character from the class name
-    confidence_score = prediction[0][index] # Get the confidence score of the prediction
+    def publish_result(self, result: dict):
+        """Publish detection result to MQTT"""
+        try:
+            json_result = json.dumps(result)
+            self.mqtt_client.publish(self.config.topic, json_result)
+            logger.info(f"Published to {self.config.topic}: {json_result}")
+        except Exception as e:
+            logger.error(f"Failed to publish result: {e}")
+            raise
 
-    # End the timer and calculate the elapsed time
-    end_time = time.time()
-    elapsed_time = end_time - start_time
+    def run_detection_loop(self):
+        """Main detection loop"""
+        logger.info("Starting detection loop...")
+        while True:
+            try:
+                result = self.detect()
+                self.publish_result(result)
+                time.sleep(self.config.detect_interval)
+            except Exception as e:
+                logger.error(f"Error in detection loop: {e}")
+                time.sleep(5)  # Wait before retrying
 
-    # Print the prediction, confidence score, and elapsed time 
-    print("Class:", class_name[2:], "Confidence Score:", confidence_score, "Elapsed Time:", round(elapsed_time, 2))
+def main():
+    """Main entry point"""
+    try:
+        config = Config.from_env()
+        detector = CloudDetector(config)
+        detector.run_detection_loop()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        raise
 
-    # Create a dictionary with the class name and confidence score
-    data = {
-        "class_name": class_name[2:], # Remove the index number from the class name
-        "confidence_score": round(float(confidence_score) * 100, 2), # Convert the confidence score to a percentage
-        "Detection Time (Seconds)": round(elapsed_time, 2) # Round the elapsed time to 2 decimal places
-    }
-
-    # Convert dictionary to JSON object
-    json_object = json.dumps(data) # Convert the dictionary to a JSON object
-
-    # Return the JSON object
-    return json_object
-
-# Function to publish the JSON object to an MQTT topic
-def publish(json_object):
-    # Publish the JSON object to the MQTT topic
-    client.publish(topic, json_object)
-    print("Published data to MQTT topic:", topic, "Data:", json_object)
-
-
-# Main function
 if __name__ == "__main__":
-    while True:
-        # Call the function to detect
-        result = detect(image_url, topic, model, class_names)
-        # Call the function to publish
-        publish(result)
-        # Wait for 60 seconds
-        time.sleep(detect_interval)
+    main()
