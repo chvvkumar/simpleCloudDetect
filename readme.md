@@ -47,6 +47,8 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
   -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
@@ -63,6 +65,8 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
   chvvkumar/simpleclouddetect:latest
 ```
@@ -79,6 +83,8 @@ docker compose:
           - MQTT_BROKER=192.168.1.250
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
+          - MQTT_USERNAME=
+          - MQTT_PASSWORD=
           - DETECT_INTERVAL=60
         volumes:
           - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
@@ -95,6 +101,8 @@ docker compose:
           - MQTT_BROKER=192.168.1.250
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
+          - MQTT_USERNAME=
+          - MQTT_PASSWORD=
           - DETECT_INTERVAL=60
         volumes:
           - '$HOME/path/to/image.jpg:/tmp/image.jpg'
