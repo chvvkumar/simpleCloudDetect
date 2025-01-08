@@ -22,7 +22,11 @@ COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 
 # Copy application files
-COPY convert.py detect.py ./
+COPY convert.py detect.py keras_model.h5 labels.txt ./
+
+# Set proper permissions
+RUN chown clouddetect:clouddetect /app/keras_model.h5 && \
+    chmod 644 /app/keras_model.h5
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
