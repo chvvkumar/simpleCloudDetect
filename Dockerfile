@@ -24,10 +24,6 @@ WORKDIR /app
 # Copy application files
 COPY convert.py detect.py keras_model.h5 labels.txt ./
 
-# Set proper permissions
-RUN chown clouddetect:clouddetect /app/keras_model.h5 && \
-    chmod 644 /app/keras_model.h5
-
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
@@ -35,7 +31,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 # Create non-root user
 RUN useradd -m -r clouddetect && \
-    chown -R clouddetect:clouddetect /app
+    chown -R clouddetect:clouddetect /app && \
+    chmod 644 /app/keras_model.h5
 
 # Switch to non-root user
 USER clouddetect
