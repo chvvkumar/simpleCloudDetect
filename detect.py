@@ -94,19 +94,28 @@ class CloudDetector:
             logger.error(f"Failed to connect to MQTT broker: {e}")
             raise
 
-    def _load_image(self, image_url: str) -> Image.Image:
-        """Load and return image from URL or file"""
-        try:
-            if image_url.startswith("file://"):
-                file_path = Path(urllib.parse.urlparse(image_url).path)
-                return Image.open(file_path).convert("RGB")
-            else:
-                response = requests.get(image_url, timeout=10)
-                response.raise_for_status()
-                return Image.open(requests.get(image_url, timeout=10).content).convert("RGB")
-        except Exception as e:
-            logger.error(f"Failed to load image from {image_url}: {e}")
-            raise
+    def _load_image(self, image_url: str, max_retries: int = 3) -> Image.Image:
+        """Load and return image from URL or file with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                if image_url.startswith("file://"):
+                    # Handle file URLs
+                    parsed = urllib.parse.urlparse(image_url)
+                    file_path = Path(parsed.path.lstrip('/'))  # Remove leading slashes
+                    if not file_path.exists():
+                        raise FileNotFoundError(f"Image file not found: {file_path}")
+                    return Image.open(file_path).convert("RGB")
+                else:
+                    # Handle HTTP URLs
+                    response = requests.get(image_url, timeout=10, stream=True)
+                    response.raise_for_status()
+                    return Image.open(response.raw).convert("RGB")
+            except (requests.RequestException, IOError) as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    logger.error(f"Failed to load image from {image_url} after {max_retries} attempts: {e}")
+                    raise
+                logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+                time.sleep(1)  # Wait before retrying
 
     def _preprocess_image(self, image: Image.Image) -> np.ndarray:
         """Preprocess image for model input"""
