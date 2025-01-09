@@ -32,6 +32,7 @@ Main branch
 [![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls) 
 
 CHANGES:
+- 2025-01-09: Add MQTT authentication, improve logging to be more descriptive
 - 2024-12-16: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
 - 2024-11-19: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8 .
 - 2024-10-26: Initial release with basic cloud detection functionality.
@@ -47,6 +48,8 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
   -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
@@ -63,6 +66,8 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
   chvvkumar/simpleclouddetect:latest
 ```
@@ -79,6 +84,8 @@ docker compose:
           - MQTT_BROKER=192.168.1.250
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
+          - MQTT_USERNAME=
+          - MQTT_PASSWORD=
           - DETECT_INTERVAL=60
         volumes:
           - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
@@ -95,6 +102,8 @@ docker compose:
           - MQTT_BROKER=192.168.1.250
           - MQTT_PORT=1883
           - MQTT_TOPIC=Astro/SimpleCloudDetect
+          - MQTT_USERNAME=
+          - MQTT_PASSWORD=
           - DETECT_INTERVAL=60
         volumes:
           - '$HOME/path/to/image.jpg:/tmp/image.jpg'
