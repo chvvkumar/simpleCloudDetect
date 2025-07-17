@@ -1,3 +1,7 @@
 -r requirements-common.txt
-# Use TensorFlow Lite for ARM architectures
-tflite-runtime==2.15.0
+
+# TensorFlow Lite for ARM architectures
+# Use a more compatible version for ARM devices
+h5py>=3.1.0
+# tflite-runtime is the optimized version of TensorFlow for ARM
+tflite-runtime>=2.14.0

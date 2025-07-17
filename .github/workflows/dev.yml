@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          ref: dev 
+          ref: dev
       - name: Log current Git branch
         run: echo "Branch is set to branch $(git rev-parse --abbrev-ref HEAD)"
         
@@ -33,7 +33,7 @@ jobs:
         with:
           platforms: linux/amd64,linux/arm/v7,linux/arm64
 
-      # Build and push platform-specific images
+      # Build and push AMD64 image
       - name: Build and push AMD64 image
         uses: docker/build-push-action@v4
         with:
@@ -44,6 +44,7 @@ jobs:
           build-args: |
             TARGETARCH=amd64
 
+      # Build and push ARM32v7 image
       - name: Build and push ARM32v7 image
         uses: docker/build-push-action@v4
         with:
@@ -54,6 +55,7 @@ jobs:
           build-args: |
             TARGETARCH=arm
 
+      # Build and push ARM64v8 image
       - name: Build and push ARM64v8 image
         uses: docker/build-push-action@v4
         with:
@@ -62,7 +64,7 @@ jobs:
           platforms: linux/arm64
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:dev-arm64v8
           build-args: |
-            TARGETARCH=arm
+            TARGETARCH=arm64
 
       # Create and push a multi-platform manifest
       - name: Create and push manifest

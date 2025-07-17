@@ -1,42 +1,37 @@
 # Multi-architecture Dockerfile for SimpleCloudDetect
 # Supports x86_64 (amd64) and ARM (Raspberry Pi)
 
-ARG PYTHON_VERSION=3.11
-ARG DEBIAN_FRONTEND=noninteractive
+FROM python:3.11-slim
 
-# Base stage with common dependencies
-FROM python:${PYTHON_VERSION}-slim AS base
+ARG TARGETARCH
+RUN echo "Building for architecture: ${TARGETARCH}"
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy shared requirements
-COPY requirements-common.txt .
+# Copy requirements files
+COPY requirements-common.txt requirements-amd64.txt requirements-arm.txt ./
 
-# Install common dependencies
+# Install common dependencies first
 RUN pip install -U pip && \
     pip install --no-cache-dir -r requirements-common.txt
 
+# Install architecture-specific dependencies
+RUN if [ "$TARGETARCH" = "arm64" ] || [ "$TARGETARCH" = "arm" ]; then \
+        echo "Installing ARM dependencies" && \
+        pip install --no-cache-dir -r requirements-arm.txt; \
+    else \
+        echo "Installing AMD64 dependencies" && \
+        pip install --no-cache-dir -r requirements-amd64.txt; \
+    fi
+
+# Copy application files
+COPY convert.py detect.py keras_model.h5 labels.txt ./
+
 # Add labels
 LABEL maintainer="simpleCloudDetect" \
-      description="Cloud detection service with multi-architecture support"
-
-# AMD64 (x86_64) specific stage
-FROM base AS amd64
-COPY requirements-amd64.txt .
-RUN pip install --no-cache-dir -r requirements-amd64.txt
-
-# ARM specific stage
-FROM base AS arm
-COPY requirements-arm.txt .
-# Use the pre-compiled tflite-runtime which is optimized for ARM
-RUN pip install --no-cache-dir -r requirements-arm.txt
-
-# Final stage that selects the appropriate base image
-FROM ${TARGETARCH:-amd64}
-
-# Copy all application files
-COPY convert.py detect.py keras_model.h5 labels.txt ./
+      description="Cloud detection service with multi-architecture support" \
+      architecture="${TARGETARCH}"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
