@@ -4,16 +4,16 @@ import logging
 import os
 import time
 import json
+import platform
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union, Any
 
 import numpy as np
 import paho.mqtt.client as mqtt
 import requests
 from PIL import Image, ImageOps
-from keras.models import load_model
 
 # Configure logging
 logging.basicConfig(
@@ -22,12 +22,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def detect_architecture():
+    """Detect the current system architecture."""
+    machine = platform.machine().lower()
+    if machine in ('arm', 'armv7l', 'armv6l', 'aarch64'):
+        return 'arm'
+    return 'x86_64'  # Default to x86_64
+
 @dataclass
 class Config:
     """Configuration class to hold all environment variables"""
     image_url: str
     model_path: str
     label_path: str
+    tflite_model_path: str
     broker: str
     port: int
     topic: str
@@ -46,6 +54,7 @@ class Config:
         return cls(
             image_url=os.environ['IMAGE_URL'],
             model_path=os.getenv('MODEL_PATH', 'keras_model.h5'),
+            tflite_model_path=os.getenv('TFLITE_MODEL_PATH', 'model.tflite'),
             label_path=os.getenv('LABEL_PATH', 'labels.txt'),
             broker=os.environ['MQTT_BROKER'],
             port=int(os.getenv('MQTT_PORT', '1883')),
@@ -55,20 +64,115 @@ class Config:
             mqtt_password=os.getenv('MQTT_PASSWORD')
         )
 
+class ModelWrapper:
+    """Abstract base class for model wrappers"""
+    def predict(self, input_data: np.ndarray) -> np.ndarray:
+        """
+        Make a prediction using the model
+        
+        Args:
+            input_data: Input data for prediction
+            
+        Returns:
+            Prediction output
+        """
+        raise NotImplementedError("Subclasses must implement predict()")
+
+class TensorFlowModelWrapper(ModelWrapper):
+    """Wrapper for TensorFlow model"""
+    def __init__(self, model_path: str):
+        """
+        Initialize with a TensorFlow model
+        
+        Args:
+            model_path: Path to the Keras model file
+        """
+        from keras.models import load_model
+        self.model = load_model(model_path, compile=False)
+        logger.info(f"Loaded TensorFlow model from {model_path}")
+    
+    def predict(self, input_data: np.ndarray) -> np.ndarray:
+        """
+        Make a prediction using the TensorFlow model
+        
+        Args:
+            input_data: Input data for prediction
+            
+        Returns:
+            Prediction output
+        """
+        return self.model.predict(input_data, verbose=0)
+
+class TFLiteModelWrapper(ModelWrapper):
+    """Wrapper for TensorFlow Lite model"""
+    def __init__(self, model_path: str):
+        """
+        Initialize with a TensorFlow Lite model
+        
+        Args:
+            model_path: Path to the TFLite model file
+        """
+        import tflite_runtime.interpreter as tflite
+        
+        self.interpreter = tflite.Interpreter(model_path=model_path)
+        self.interpreter.allocate_tensors()
+        
+        # Get input and output details
+        self.input_details = self.interpreter.get_input_details()
+        self.output_details = self.interpreter.get_output_details()
+        logger.info(f"Loaded TFLite model from {model_path}")
+    
+    def predict(self, input_data: np.ndarray) -> np.ndarray:
+        """
+        Make a prediction using the TensorFlow Lite model
+        
+        Args:
+            input_data: Input data for prediction
+            
+        Returns:
+            Prediction output
+        """
+        # Check input shape and type
+        input_shape = self.input_details[0]['shape']
+        if input_data.shape != (1, 224, 224, 3):
+            raise ValueError(f"Input shape mismatch. Expected {input_shape}, got {input_data.shape}")
+        
+        # Set input tensor
+        self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+        
+        # Run inference
+        self.interpreter.invoke()
+        
+        # Get output tensor
+        output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+        return output_data
+
 class CloudDetector:
     """Main class for cloud detection operations"""
     def __init__(self, config: Config):
         self.config = config
+        self.arch = detect_architecture()
         self.model = self._load_model()
         self.class_names = self._load_class_names()
         self.mqtt_client = self._setup_mqtt()
         
-    def _load_model(self):
-        """Load and return the Keras model"""
+    def _load_model(self) -> ModelWrapper:
+        """Load and return the appropriate model based on architecture"""
         try:
-            return load_model(self.config.model_path, compile=False)
+            if self.arch == 'arm':
+                logger.info(f"Loading TFLite model for ARM architecture")
+                # Check if TFLite model exists, if not, it might need to be converted
+                tflite_path = Path(self.config.tflite_model_path)
+                if not tflite_path.exists():
+                    logger.warning(f"TFLite model not found at {tflite_path}, running conversion")
+                    from convert import convert_to_tflite
+                    convert_to_tflite(self.config.model_path, self.config.tflite_model_path)
+                return TFLiteModelWrapper(self.config.tflite_model_path)
+            else:
+                logger.info(f"Loading TensorFlow model for x86_64 architecture")
+                return TensorFlowModelWrapper(self.config.model_path)
         except Exception as e:
-            logger.error(f"Failed to load model from {self.config.model_path}: {e}")
+            logger.error(f"Failed to load model: {e}")
             raise
 
     def _load_class_names(self):
@@ -135,7 +239,7 @@ class CloudDetector:
             preprocessed_image = self._preprocess_image(image)
             
             # Make prediction
-            prediction = self.model.predict(preprocessed_image, verbose=0)
+            prediction = self.model.predict(preprocessed_image)
             index = np.argmax(prediction)
             class_name = self.class_names[index].strip()[2:]  # Remove index and newline
             confidence_score = float(prediction[0][index])
@@ -145,7 +249,8 @@ class CloudDetector:
             result = {
                 "class_name": class_name,
                 "confidence_score": round(confidence_score * 100, 2),
-                "Detection Time (Seconds)": round(elapsed_time, 2)
+                "Detection Time (Seconds)": round(elapsed_time, 2),
+                "Architecture": self.arch
             }
             
             logger.info(f"Detection: {result}")
@@ -167,7 +272,7 @@ class CloudDetector:
 
     def run_detection_loop(self):
         """Main detection loop"""
-        logger.info("Starting detection loop...")
+        logger.info(f"Starting detection loop on {self.arch} architecture...")
         while True:
             try:
                 result = self.detect()
@@ -180,6 +285,10 @@ class CloudDetector:
 def main():
     """Main entry point"""
     try:
+        # Log architecture
+        arch = detect_architecture()
+        logger.info(f"Running on {arch} architecture")
+        
         config = Config.from_env()
         detector = CloudDetector(config)
         detector.run_detection_loop()

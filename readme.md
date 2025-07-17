@@ -1,5 +1,3 @@
-
-
 ## A simple Machine Learning based Cloud Detection for AllSky Cameras
 
   This python script will take an image from an AllSky camera, run it through a machine learning model and output cloud status to Home Assistant
@@ -21,7 +19,7 @@ Overcast
 
 ![](/images/Overcast.png)
 
-## Docker (preferred method, x86 only at the moment)
+## Docker (preferred method, supports x86 and ARM architectures)
 
 DEV Branch
 
@@ -32,6 +30,7 @@ Main branch
 [![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls) 
 
 CHANGES:
+- 2025-07-17: Add multiarch support for x86 and ARM (Raspberry Pi), using TensorFlow Lite for ARM architectures
 - 2025-01-09: Add MQTT authentication, improve logging to be more descriptive
 - 2024-12-16: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
 - 2024-11-19: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8 .
@@ -42,7 +41,7 @@ docker run:
 ```shell
 docker pull chvvkumar/simpleclouddetect:latest
 
-# When using an  image from a URL
+# When using an image from a URL
 docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
@@ -55,6 +54,17 @@ docker run -d --name simple-cloud-detect --network=host \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
   chvvkumar/simpleclouddetect:latest
 ```
+
+### Architecture-specific images
+
+The Docker images are automatically built for multiple architectures:
+- `chvvkumar/simpleclouddetect:latest` - Multi-platform manifest (automatically selects the right image)
+- `chvvkumar/simpleclouddetect:latest-amd64` - For x86_64 systems
+- `chvvkumar/simpleclouddetect:latest-arm32v7` - For Raspberry Pi 2/3/4 (32-bit)
+- `chvvkumar/simpleclouddetect:latest-arm64v8` - For Raspberry Pi 3/4/5 (64-bit)
+
+For dev builds, use the `dev` tag instead of `latest`.
+
 As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
 ```shell
 # When using an  image from a local file path
@@ -143,6 +153,16 @@ cd simpleCloudDetect
 python3.11  -m  venv  env && source  env/bin/activate
 pip  install  --upgrade  pip
 pip  install  -r  requirements.txt
+```
+
+### For ARM devices (Raspberry Pi):
+```shell
+pip install -r requirements-arm.txt
+```
+
+### For x86 devices:
+```shell
+pip install -r requirements-amd64.txt
 ```
 
 Update the script `detect.py` with your own settings for these parameters:
@@ -261,5 +281,3 @@ Add this to your MQTT sensor configuration
     state_topic: "Astro/SimpleCloudDetect"
     value_template: "{{ value_json['Detection Time (Seconds)'] }}"
     unit_of_measurement: "S"
-
-```
