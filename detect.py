@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import json
+import gc
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -172,6 +173,7 @@ class CloudDetector:
             try:
                 result = self.detect()
                 self.publish_result(result)
+                gc.collect()
                 time.sleep(self.config.detect_interval)
             except Exception as e:
                 logger.error(f"Error in detection loop: {e}")
