@@ -98,6 +98,26 @@ services:
 
 **Note**: `network_mode: host` is recommended for UDP discovery to work properly.
 
+### My own compose file example that I run
+
+```yaml
+services:
+    simpleclouddetect:
+        container_name: simple-cloud-detect
+        network_mode: host
+        environment:
+            - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
+            - MQTT_BROKER=192.168.1.250
+            - MQTT_PORT=1883
+            - MQTT_TOPIC=Astro/SimpleCloudDetect
+            - DETECT_INTERVAL=60
+        volumes:
+            - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+            - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+        restart: unless-stopped
+        image: chvvkumar/simpleclouddetect:dev #latest
+```
+
 ## Configuration
 
 ### Initial Setup
