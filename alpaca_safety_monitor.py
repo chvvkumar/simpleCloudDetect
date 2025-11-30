@@ -209,12 +209,13 @@ def get_issafe(device_number: int):
             client_transaction_id=client_tx_id
         )), 400
     
+    # Per ASCOM spec: Always return a value, never an error
+    # If disconnected, return False (unsafe) to protect equipment
     if not safety_monitor.connected:
         return jsonify(safety_monitor.create_response(
-            error_number=ERROR_NOT_CONNECTED,
-            error_message="Device not connected",
+            value=False,  # Always unsafe when disconnected
             client_transaction_id=client_tx_id
-        )), 200
+        ))
     
     try:
         is_safe = safety_monitor.is_safe()
