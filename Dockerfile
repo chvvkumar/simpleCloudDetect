@@ -11,7 +11,10 @@ COPY requirements.txt .
 RUN pip install -U pip && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container, excluding keras_model.h5 and labels.txt
-COPY convert.py detect.py ./
+COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
 
-# Run convert.py first, then detect.py
-CMD ["sh", "-c", "python convert.py && python detect.py"]
+# Make the startup script executable
+RUN chmod +x start_services.sh
+
+# Run the startup script to launch both services
+CMD ["./start_services.sh"]
