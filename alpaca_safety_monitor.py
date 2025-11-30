@@ -571,8 +571,9 @@ class AlpacaDiscovery:
             logger.error(f"Failed to send discovery response: {e}")
 
 
-def main():
-    """Main entry point"""
+# Initialize application at module level for gunicorn
+def create_app():
+    """Application factory for gunicorn"""
     import os
     
     global safety_monitor
@@ -594,18 +595,32 @@ def main():
     discovery = AlpacaDiscovery(alpaca_config.port)
     discovery.start()
     
-    logger.info(f"Starting ASCOM Alpaca SafetyMonitor on port {alpaca_config.port}")
+    logger.info(f"ASCOM Alpaca SafetyMonitor initialized")
     logger.info(f"Device: {alpaca_config.device_name}")
     logger.info(f"Update interval: {alpaca_config.update_interval}s")
     logger.info(f"Unsafe conditions: {', '.join(UNSAFE_CONDITIONS)}")
     
-    try:
-        # Run Flask app
-        app.run(host='0.0.0.0', port=alpaca_config.port, debug=False)
-    finally:
-        # Clean shutdown
-        discovery.stop()
+    return app
+
+
+def main():
+    """Main entry point for standalone execution"""
+    import os
+    
+    # Create and configure app
+    application = create_app()
+    
+    # Get port from environment
+    port = int(os.getenv('ALPACA_PORT', '11111'))
+    
+    logger.info(f"Starting ASCOM Alpaca SafetyMonitor on port {port}")
+    
+    # Run Flask development server
+    application.run(host='0.0.0.0', port=port, debug=False)
 
 
 if __name__ == '__main__':
     main()
+else:
+    # When imported by gunicorn, initialize the app
+    app = create_app()

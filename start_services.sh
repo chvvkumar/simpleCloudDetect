@@ -12,7 +12,7 @@ python detect.py &
 DETECT_PID=$!
 
 echo "Starting Alpaca SafetyMonitor API server..."
-python alpaca_safety_monitor.py &
+gunicorn --bind 0.0.0.0:11111 --workers 2 --threads 2 --timeout 120 alpaca_safety_monitor:app &
 ALPACA_PID=$!
 
 echo "Services started:"
