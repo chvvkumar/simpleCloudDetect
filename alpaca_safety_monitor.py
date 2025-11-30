@@ -11,12 +11,13 @@ import logging
 import socket
 import threading
 import time
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Optional, Dict, Any
 import json
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 
 from detect import CloudDetector, Config as DetectConfig
@@ -35,8 +36,8 @@ ERROR_INVALID_VALUE = 0x401    # 1025
 ERROR_NOT_CONNECTED = 0x407    # 1031
 ERROR_UNSPECIFIED = 0x500      # 1280
 
-# Unsafe weather conditions
-UNSAFE_CONDITIONS = {'Rain', 'Snow', 'Mostly Cloudy', 'Overcast'}
+# Available cloud conditions from ML model
+ALL_CLOUD_CONDITIONS = ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
 
 
 @dataclass
@@ -50,6 +51,31 @@ class AlpacaConfig:
     driver_version: str = "1.0"
     interface_version: int = 1
     update_interval: int = 30  # seconds between cloud detection updates
+    location: str = "AllSky Camera"
+    unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
+    
+    def save_to_file(self, filepath: str = "alpaca_config.json"):
+        """Save configuration to JSON file"""
+        try:
+            config_dict = asdict(self)
+            with open(filepath, 'w') as f:
+                json.dump(config_dict, f, indent=2)
+            logger.info(f"Configuration saved to {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to save configuration: {e}")
+    
+    @classmethod
+    def load_from_file(cls, filepath: str = "alpaca_config.json"):
+        """Load configuration from JSON file"""
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'r') as f:
+                    config_dict = json.load(f)
+                logger.info(f"Configuration loaded from {filepath}")
+                return cls(**config_dict)
+        except Exception as e:
+            logger.error(f"Failed to load configuration: {e}")
+        return None
 
 
 class AlpacaSafetyMonitor:
@@ -198,7 +224,7 @@ class AlpacaSafetyMonitor:
                 return False
             
             cloud_condition = self.latest_detection.get('class_name', '')
-            is_safe = cloud_condition not in UNSAFE_CONDITIONS
+            is_safe = cloud_condition not in self.alpaca_config.unsafe_conditions
             
             logger.debug(f"Safety check: {cloud_condition} -> {'SAFE' if is_safe else 'UNSAFE'}")
             return is_safe
@@ -535,10 +561,10 @@ def get_apiversions():
 def get_management_description():
     """Get server description"""
     value = {
-        "ServerName": "SimpleCloudDetect",
+        "ServerName": safety_monitor.alpaca_config.device_name,
         "Manufacturer": "chvvkumar",
         "ManufacturerVersion": "1.0",
-        "Location": "AllSky Camera"
+        "Location": safety_monitor.alpaca_config.location
     }
     # MUST wrap in create_response
     return jsonify(safety_monitor.create_response(value=value))
@@ -555,6 +581,235 @@ def get_configured_devices():
     }]
     # MUST wrap in create_response
     return jsonify(safety_monitor.create_response(value=value))
+
+
+@app.route('/setup/v1/safetymonitor/<int:device_number>/setup', methods=['GET', 'POST'])
+def setup_device(device_number: int):
+    """Setup page for configuring device name and location"""
+    if device_number != safety_monitor.alpaca_config.device_number:
+        return jsonify({"error": "Invalid device number"}), 404
+    
+    if request.method == 'POST':
+        # Handle form submission
+        device_name = request.form.get('device_name', '').strip()
+        location = request.form.get('location', '').strip()
+        
+        if device_name:
+            safety_monitor.alpaca_config.device_name = device_name
+            logger.info(f"Device name updated to: {device_name}")
+        
+        if location:
+            safety_monitor.alpaca_config.location = location
+            logger.info(f"Location updated to: {location}")
+        
+        # Handle unsafe conditions checkboxes
+        unsafe_conditions = []
+        for condition in ALL_CLOUD_CONDITIONS:
+            if request.form.get(f'unsafe_{condition}'):
+                unsafe_conditions.append(condition)
+        
+        safety_monitor.alpaca_config.unsafe_conditions = unsafe_conditions
+        logger.info(f"Unsafe conditions updated to: {unsafe_conditions}")
+        
+        # Save configuration to file
+        safety_monitor.alpaca_config.save_to_file()
+        
+        # Return success message
+        message = "Configuration updated successfully!"
+    else:
+        message = ""
+    
+    # HTML form for setup
+    html_template = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>SimpleCloudDetect Setup</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 700px;
+                margin: 50px auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+            .container {
+                background-color: white;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #333;
+                border-bottom: 2px solid #4CAF50;
+                padding-bottom: 10px;
+            }
+            h2 {
+                color: #555;
+                margin-top: 30px;
+                margin-bottom: 15px;
+                font-size: 18px;
+            }
+            .form-group {
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                margin-bottom: 5px;
+                color: #555;
+                font-weight: bold;
+            }
+            input[type="text"] {
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                box-sizing: border-box;
+                font-size: 14px;
+            }
+            input[type="text"]:focus {
+                outline: none;
+                border-color: #4CAF50;
+            }
+            .checkbox-group {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                padding: 15px;
+                background-color: #f9f9f9;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+            .checkbox-item {
+                display: flex;
+                align-items: center;
+            }
+            .checkbox-item input[type="checkbox"] {
+                margin-right: 8px;
+                width: 18px;
+                height: 18px;
+                cursor: pointer;
+            }
+            .checkbox-item label {
+                margin: 0;
+                font-weight: normal;
+                cursor: pointer;
+            }
+            button {
+                background-color: #4CAF50;
+                color: white;
+                padding: 12px 30px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 16px;
+                width: 100%;
+                margin-top: 20px;
+            }
+            button:hover {
+                background-color: #45a049;
+            }
+            .message {
+                background-color: #d4edda;
+                color: #155724;
+                padding: 12px;
+                border-radius: 4px;
+                margin-bottom: 20px;
+                border: 1px solid #c3e6cb;
+            }
+            .info {
+                background-color: #e7f3ff;
+                padding: 15px;
+                border-radius: 4px;
+                margin-bottom: 20px;
+                border-left: 4px solid #2196F3;
+            }
+            .info p {
+                margin: 5px 0;
+                color: #555;
+            }
+            .help-text {
+                font-size: 13px;
+                color: #666;
+                margin-top: 5px;
+                font-style: italic;
+            }
+            .safe-indicator {
+                color: #4CAF50;
+                font-weight: bold;
+            }
+            .unsafe-indicator {
+                color: #f44336;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>SimpleCloudDetect Setup</h1>
+            
+            {% if message %}
+            <div class="message">{{ message }}</div>
+            {% endif %}
+            
+            <div class="info">
+                <p><strong>Current Configuration:</strong></p>
+                <p>Device Name: {{ current_name }}</p>
+                <p>Location: {{ current_location }}</p>
+                <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
+                <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
+            </div>
+            
+            <form method="POST">
+                <div class="form-group">
+                    <label for="device_name">Device Name:</label>
+                    <input type="text" id="device_name" name="device_name" 
+                           value="{{ current_name }}" placeholder="Enter device name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="location">Location:</label>
+                    <input type="text" id="location" name="location" 
+                           value="{{ current_location }}" placeholder="Enter location">
+                </div>
+                
+                <div class="form-group">
+                    <h2>Safety Configuration</h2>
+                    <label>Mark conditions that are UNSAFE for observing:</label>
+                    <div class="help-text">Unchecked conditions will be considered SAFE</div>
+                    <div class="checkbox-group">
+                        {% for condition in all_conditions %}
+                        <div class="checkbox-item">
+                            <input type="checkbox" 
+                                   id="unsafe_{{ condition }}" 
+                                   name="unsafe_{{ condition }}"
+                                   {% if condition in unsafe_conditions %}checked{% endif %}>
+                            <label for="unsafe_{{ condition }}">{{ condition }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <button type="submit">Save Configuration</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Calculate safe vs unsafe conditions for display
+    unsafe_conditions = safety_monitor.alpaca_config.unsafe_conditions
+    safe_conditions = [c for c in ALL_CLOUD_CONDITIONS if c not in unsafe_conditions]
+    
+    return render_template_string(
+        html_template,
+        message=message,
+        current_name=safety_monitor.alpaca_config.device_name,
+        current_location=safety_monitor.alpaca_config.location,
+        all_conditions=ALL_CLOUD_CONDITIONS,
+        unsafe_conditions=unsafe_conditions,
+        safe_conditions=safe_conditions
+    )
 
 
 class AlpacaDiscovery:
@@ -642,12 +897,23 @@ def create_app():
     # Load detection configuration
     detect_config = DetectConfig.from_env()
     
-    # Create Alpaca configuration
-    alpaca_config = AlpacaConfig(
-        port=int(os.getenv('ALPACA_PORT', '11111')),
-        device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
-        update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
-    )
+    # Try to load Alpaca configuration from file first
+    alpaca_config = AlpacaConfig.load_from_file()
+    
+    if alpaca_config is None:
+        # Create default Alpaca configuration if file doesn't exist
+        alpaca_config = AlpacaConfig(
+            port=int(os.getenv('ALPACA_PORT', '11111')),
+            device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
+            update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
+        )
+        # Save default config
+        alpaca_config.save_to_file()
+    else:
+        # Override port settings from environment if provided
+        alpaca_config.port = int(os.getenv('ALPACA_PORT', str(alpaca_config.port)))
+        alpaca_config.device_number = int(os.getenv('ALPACA_DEVICE_NUMBER', str(alpaca_config.device_number)))
+        alpaca_config.update_interval = int(os.getenv('ALPACA_UPDATE_INTERVAL', str(alpaca_config.update_interval)))
     
     # Initialize safety monitor
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
@@ -659,7 +925,8 @@ def create_app():
     logger.info(f"ASCOM Alpaca SafetyMonitor initialized")
     logger.info(f"Device: {alpaca_config.device_name}")
     logger.info(f"Update interval: {alpaca_config.update_interval}s")
-    logger.info(f"Unsafe conditions: {', '.join(UNSAFE_CONDITIONS)}")
+    logger.info(f"Unsafe conditions: {', '.join(alpaca_config.unsafe_conditions)}")
+    logger.info(f"Safe conditions: {', '.join([c for c in ALL_CLOUD_CONDITIONS if c not in alpaca_config.unsafe_conditions])}")
     
     return app
 
