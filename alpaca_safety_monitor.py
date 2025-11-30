@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 ASCOM Alpaca SafetyMonitor Server
-Provides a safety monitor interface based on cloud detection
+Provides a safety monitor interface based on SimpleCloudDetect cloud detection:
+https://github.com/chvvkumar/simpleCloudDetect
+
+Authors: chvvkumar
 """
 
 import logging
@@ -41,7 +44,7 @@ class AlpacaConfig:
     """Configuration for the Alpaca server"""
     port: int = 11111
     device_number: int = 0
-    device_name: str = "Cloud Detection Safety Monitor"
+    device_name: str = "SimpleCloudDetect"
     device_description: str = "ASCOM SafetyMonitor based on ML cloud detection"
     driver_info: str = "ASCOM Alpaca SafetyMonitor v1.0 - Cloud Detection Driver"
     driver_version: str = "1.0"
@@ -532,10 +535,10 @@ def get_apiversions():
 def get_management_description():
     """Get server description"""
     value = {
-        "ServerName": "Cloud Detection Safety Monitor",
-        "Manufacturer": "Open Source",
+        "ServerName": "SimpleCloudDetect",
+        "Manufacturer": "chvvkumar",
         "ManufacturerVersion": "1.0",
-        "Location": "Cloud"
+        "Location": "AllSky Camera"
     }
     # MUST wrap in create_response
     return jsonify(safety_monitor.create_response(value=value))
