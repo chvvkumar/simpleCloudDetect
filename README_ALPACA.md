@@ -13,6 +13,7 @@ The SafetyMonitor integrates with the existing cloud detection system to provide
 
 - ✅ Full ASCOM Alpaca API compliance (ISafetyMonitorV1)
 - ✅ RESTful HTTP interface on port 11111 (configurable)
+- ✅ **Production-ready WSGI server (Gunicorn)**
 - ✅ **Automatic device discovery via UDP (port 32227)**
 - ✅ Continuous cloud monitoring with configurable update intervals
 - ✅ Thread-safe operations
