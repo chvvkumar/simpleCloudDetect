@@ -5,7 +5,7 @@ on:
     branches:
       - "dev"
     paths-ignore:
-      - 'readme.md'
+      - '*.md'
       - 'images/**'
 
 jobs:
