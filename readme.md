@@ -1,8 +1,20 @@
-
+# SimpleCloudDetect
 
 ## A simple Machine Learning based Cloud Detection for AllSky Cameras
 
-  This python script will take an image from an AllSky camera, run it through a machine learning model and output cloud status to Home Assistant
+This project provides ML-based cloud detection for AllSky cameras with two primary outputs:
+1. **MQTT Publishing** - Publishes cloud status to Home Assistant or other MQTT subscribers
+2. **ASCOM Alpaca SafetyMonitor** - Provides an ASCOM-compliant SafetyMonitor device for astronomy software
+
+## Features
+
+- Machine Learning cloud classification (Clear, Wisps, Mostly Cloudy, Overcast, Rain, Snow)
+- MQTT integration for Home Assistant
+- ASCOM Alpaca SafetyMonitor for astronomy automation (N.I.N.A., SGP, TheSkyX, etc.)
+- Docker support with both services running simultaneously
+- Support for both URL-based and local file images
+- Custom model support
+- Confidence scores and detection timing
 
 ## Screenshots
 
@@ -31,18 +43,61 @@ Main branch
 
 [![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls) 
 
-CHANGES:
-- 2025-01-09: Add MQTT authentication, improve logging to be more descriptive
-- 2024-12-16: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
-- 2024-11-19: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8 .
-- 2024-10-26: Initial release with basic cloud detection functionality.
+## Recent Changes
+
+- **2025-11-30**: Add Home Assistant MQTT Discovery support for automatic device/entity creation
+- **2025-11-30**: Add ASCOM Alpaca SafetyMonitor implementation for astronomy software integration
+- **2025-01-09**: Add MQTT authentication, improve logging to be more descriptive
+- **2024-12-16**: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
+- **2024-11-19**: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8
+- **2024-10-26**: Initial release with basic cloud detection functionality
+
+## Documentation
+
+- **[Main Documentation (this file)](readme.md)** - MQTT integration and basic setup
+- **[Alpaca SafetyMonitor Guide](ALPACA_README.md)** - ASCOM Alpaca implementation details
 
 
-docker run:
+### Environment Variables
+
+#### Cloud Detection (Shared)
+- `IMAGE_URL` - URL or file path to AllSky camera image (required)
+- `MQTT_BROKER` - MQTT broker address (required)
+- `MQTT_PORT` - MQTT broker port (default: 1883)
+- `MQTT_USERNAME` - MQTT authentication username (optional)
+- `MQTT_PASSWORD` - MQTT authentication password (optional)
+- `DETECT_INTERVAL` - Detection interval in seconds (default: 60)
+
+#### MQTT Publishing Modes
+- `MQTT_DISCOVERY_MODE` - MQTT publishing mode: `legacy` or `homeassistant` (default: `legacy`)
+  - **legacy**: Publishes JSON to a single topic (requires `MQTT_TOPIC`)
+  - **homeassistant**: Uses HA MQTT Discovery for automatic device/entity creation
+
+**Legacy Mode (Manual YAML Configuration)**
+- `MQTT_TOPIC` - MQTT topic for publishing (required for legacy mode)
+
+**Home Assistant Discovery Mode (Automatic Configuration)**
+- `DEVICE_ID` - Unique device identifier (required for homeassistant mode)
+- `DEVICE_NAME` - Custom device name in Home Assistant (default: "Cloud Detector")
+- `MQTT_DISCOVERY_PREFIX` - HA discovery prefix (default: "homeassistant")
+
+#### Alpaca SafetyMonitor (Optional)
+- `ALPACA_PORT` - HTTP API port (default: 11111)
+- `ALPACA_DEVICE_NUMBER` - Device number (default: 0)
+- `ALPACA_UPDATE_INTERVAL` - Update interval in seconds (default: 30)
+
+See [ALPACA_README.md](ALPACA_README.md) for detailed Alpaca configuration.
+
+### Docker Run
+
 ```shell
 docker pull chvvkumar/simpleclouddetect:latest
+```
 
-# When using an  image from a URL
+#### Legacy Mode (Manual YAML Configuration)
+
+```shell
+# When using an image from a URL
 docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
@@ -51,13 +106,42 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_USERNAME="your_username" \
   -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
+  -e ALPACA_PORT="11111" \
+  -e ALPACA_UPDATE_INTERVAL="30" \
   -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
   chvvkumar/simpleclouddetect:latest
 ```
-As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
+
+#### Home Assistant Discovery Mode (Automatic Configuration)
+
 ```shell
-# When using an  image from a local file path
+# When using an image from a URL with HA Discovery
+docker run -d --name simple-cloud-detect --network=host \
+  -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_PORT="1883" \
+  -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DEVICE_ID="clouddetect_001" \
+  -e DEVICE_NAME="AllSky Cloud Detector" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
+  -e DETECT_INTERVAL="60" \
+  -e ALPACA_PORT="11111" \
+  -e ALPACA_UPDATE_INTERVAL="30" \
+  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
+  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
+  chvvkumar/simpleclouddetect:latest
+```
+
+**Note**: The container runs both MQTT and Alpaca SafetyMonitor services simultaneously.
+### Using Local Image Files
+
+As an alternative, mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
+
+**Legacy Mode:**
+```shell
+# When using an image from a local file path
 docker run -d --name simple-cloud-detect --network=host \
   -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
   -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
@@ -69,50 +153,157 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_USERNAME="your_username" \
   -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
+  -e ALPACA_PORT="11111" \
+  -e ALPACA_UPDATE_INTERVAL="30" \
   chvvkumar/simpleclouddetect:latest
 ```
 
-docker compose:
-
+**Home Assistant Discovery Mode:**
 ```shell
-# When using an  image from a URL
-    simpleclouddetect:
-        container_name: simple-cloud-detect
-        network_mode: host
-        environment:
-          - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
-          - MQTT_BROKER=192.168.1.250
-          - MQTT_PORT=1883
-          - MQTT_TOPIC=Astro/SimpleCloudDetect
-          - MQTT_USERNAME=
-          - MQTT_PASSWORD=
-          - DETECT_INTERVAL=60
-        volumes:
-          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
-          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
-        restart: unless-stopped
-        image: chvvkumar/simpleclouddetect:latest
-
-# When using an  image from a local path
-    simpleclouddetect:
-        container_name: simple-cloud-detect
-        network_mode: host
-        environment:
-          - IMAGE_URL=file:///tmp/image.jpg
-          - MQTT_BROKER=192.168.1.250
-          - MQTT_PORT=1883
-          - MQTT_TOPIC=Astro/SimpleCloudDetect
-          - MQTT_USERNAME=
-          - MQTT_PASSWORD=
-          - DETECT_INTERVAL=60
-        volumes:
-          - '$HOME/path/to/image.jpg:/tmp/image.jpg'
-          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
-          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
-        restart: unless-stopped
-        image: chvvkumar/simpleclouddetect:latest
+# When using an image from a local file path with HA Discovery
+docker run -d --name simple-cloud-detect --network=host \
+  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
+  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
+  -v $HOME/path/to/image.jpg:/tmp/image.jpg \
+  -e IMAGE_URL="file:///tmp/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_PORT="1883" \
+  -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DEVICE_ID="clouddetect_001" \
+  -e DEVICE_NAME="AllSky Cloud Detector" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
+  -e DETECT_INTERVAL="60" \
+  -e ALPACA_PORT="11111" \
+  -e ALPACA_UPDATE_INTERVAL="30" \
+  chvvkumar/simpleclouddetect:latest
 ```
-## Manual install and run Overview of operations
+
+### Docker Compose
+
+#### Legacy Mode (Manual YAML Configuration)
+
+```yaml
+# When using an image from a URL
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    network_mode: host
+    environment:
+      - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=Astro/SimpleCloudDetect
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - ALPACA_PORT=11111
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+      - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+    restart: unless-stopped
+    image: chvvkumar/simpleclouddetect:latest
+
+# When using an image from a local path
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    network_mode: host
+    environment:
+      - IMAGE_URL=file:///tmp/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=Astro/SimpleCloudDetect
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - ALPACA_PORT=11111
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - '$HOME/path/to/image.jpg:/tmp/image.jpg'
+      - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+      - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+    restart: unless-stopped
+    image: chvvkumar/simpleclouddetect:latest
+```
+
+#### Home Assistant Discovery Mode (Automatic Configuration)
+
+```yaml
+# When using an image from a URL with HA Discovery
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    network_mode: host
+    environment:
+      - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DEVICE_ID=clouddetect_001
+      - DEVICE_NAME=AllSky Cloud Detector
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - ALPACA_PORT=11111
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+      - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+    restart: unless-stopped
+    image: chvvkumar/simpleclouddetect:latest
+
+# When using an image from a local path with HA Discovery
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    network_mode: host
+    environment:
+      - IMAGE_URL=file:///tmp/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DEVICE_ID=clouddetect_001
+      - DEVICE_NAME=AllSky Cloud Detector
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - ALPACA_PORT=11111
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - '$HOME/path/to/image.jpg:/tmp/image.jpg'
+      - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
+      - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+    restart: unless-stopped
+    image: chvvkumar/simpleclouddetect:latest
+```
+
+## ASCOM Alpaca SafetyMonitor
+
+The Docker container also runs an ASCOM Alpaca SafetyMonitor service, allowing astronomy software to automatically monitor sky conditions.
+
+### Quick Start
+
+1. Start the container with Alpaca environment variables (shown above)
+2. Access the setup page: `http://<your-server-ip>:11111/setup/v1/safetymonitor/0/setup`
+3. Configure device name, location, and unsafe conditions
+4. In your ASCOM client (N.I.N.A., SGP, etc.), add a new SafetyMonitor device
+5. Use automatic discovery or manually configure with host/port
+
+### Supported Software
+
+- **N.I.N.A.** (Nighttime Imaging 'N' Astronomy)
+- **Sequence Generator Pro**
+- **TheSkyX**
+- **Any ASCOM Alpaca-compatible software**
+
+For detailed Alpaca configuration, API documentation, and troubleshooting, see **[ALPACA_README.md](ALPACA_README.md)**.
+---
+
+## Manual Installation (Non-Docker)
+
+### Overview of operations
 
 -   Ensure Python and Python-venv are version 3.11
 -   Clone repo
@@ -238,28 +429,54 @@ Oct 26 10:13:13 allskypi5 python[5694]: Published data to MQTT topic: Astro/Simp
 Oct 26 10:13:13 allskypi5 python[5694]: [193B blob data]
 ```
 
-## Add sensors to Home Assistant
+## Home Assistant Integration
 
-Add this to your MQTT sensor configuration
+### Option 1: Home Assistant MQTT Discovery (Recommended)
+
+**No configuration required!** When using `MQTT_DISCOVERY_MODE=homeassistant`, the device and all sensors automatically appear in Home Assistant.
+
+**What you get:**
+- A single device named according to your `DEVICE_NAME` setting
+- Three sensors automatically created:
+  - **Cloud Status** - Current sky condition (Clear, Wisps, Mostly Cloudy, Overcast, Rain, Snow)
+  - **Confidence** - Detection confidence percentage
+  - **Detection Time** - Time taken for detection in seconds
+- Availability tracking - Shows when the detector is online/offline
+- Proper device grouping in Home Assistant UI
+
+**Setup:**
+1. Configure your container with HA discovery mode (see examples above)
+2. Start the container
+3. In Home Assistant, go to **Settings → Devices & Services → MQTT**
+4. Your cloud detector device will appear automatically under "MQTT Devices"
+
+**Device ID:** Choose a unique `DEVICE_ID` for each detector if you have multiple AllSky cameras.
+
+### Option 2: Legacy Mode (Manual YAML Configuration)
+
+For backward compatibility or custom setups, use legacy mode with manual sensor configuration.
+
+Add this to your MQTT sensor configuration (`configuration.yaml`):
 ```yaml
-- name: "Cloud Status"
-    unique_id: DXWiwkjvhjhzf7KGwAFDAo7K
-    icon: mdi:clouds
-    state_topic: "Astro/Skytatus"
-    value_template: "{{ value_json.class_name }}"
+mqtt:
+  sensor:
+    - name: "Cloud Status"
+      unique_id: DXWiwkjvhjhzf7KGwAFDAo7K
+      icon: mdi:clouds
+      state_topic: "Astro/SimpleCloudDetect"
+      value_template: "{{ value_json.class_name }}"
 
-- name: "Cloud Status Confidence"
-    unique_id: tdrgfwkjvhjhzf7KGwAFDAo7K
-    icon: mdi:exclamation
-    state_topic: "Astro/Skytatus"
-    value_template: "{{ value_json.confidence_score | float * 100 }}"
-    unit_of_measurement: "%"
+    - name: "Cloud Status Confidence"
+      unique_id: tdrgfwkjvhjhzf7KGwAFDAo7K
+      icon: mdi:percent
+      state_topic: "Astro/SimpleCloudDetect"
+      value_template: "{{ value_json.confidence_score }}"
+      unit_of_measurement: "%"
 
-- name: "Cloud Detection Time"
-    unique_id: dfhfyuyjghjhcjzf7
-    icon: mdi:exclamation
-    state_topic: "Astro/SimpleCloudDetect"
-    value_template: "{{ value_json['Detection Time (Seconds)'] }}"
-    unit_of_measurement: "S"
-
+    - name: "Cloud Detection Time"
+      unique_id: dfhfyuyjghjhcjzf7
+      icon: mdi:timer
+      state_topic: "Astro/SimpleCloudDetect"
+      value_template: "{{ value_json['Detection Time (Seconds)'] }}"
+      unit_of_measurement: "s"
 ```
