@@ -170,11 +170,14 @@ class AlpacaSafetyMonitor:
                            f"({result['confidence_score']:.1f}%)")
             except Exception as e:
                 logger.error(f"Error in detection loop: {e}")
-            
-            # Wait for next update
-            self.stop_detection.wait(self.alpaca_config.update_interval)
         
-        logger.info("Detection loop stopped")
+        # Wait for next update - use shorter intervals to prevent worker timeout
+        # Break waiting into 1-second chunks so we can respond to stop signal
+        for _ in range(self.alpaca_config.update_interval):
+            if self.stop_detection.wait(1.0):  # Wait 1 second at a time
+                break
+    
+    logger.info("Detection loop stopped")
     
     def connect(self):
         """Connect to the device"""
