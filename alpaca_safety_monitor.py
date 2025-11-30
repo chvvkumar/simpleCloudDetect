@@ -493,7 +493,13 @@ def deprecated_commands(device_number: int):
 @app.route('/management/apiversions', methods=['GET'])
 def get_apiversions():
     """Get supported API versions"""
-    return jsonify([1])
+    return jsonify({
+        "Value": [1],
+        "ClientTransactionID": 0,
+        "ServerTransactionID": safety_monitor.get_next_transaction_id(),
+        "ErrorNumber": 0,
+        "ErrorMessage": ""
+    })
 
 
 @app.route('/management/v1/description', methods=['GET'])
