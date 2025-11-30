@@ -30,6 +30,7 @@ ERROR_SUCCESS = 0
 ERROR_NOT_IMPLEMENTED = 0x400  # 1024
 ERROR_INVALID_VALUE = 0x401    # 1025
 ERROR_NOT_CONNECTED = 0x407    # 1031
+ERROR_UNSPECIFIED = 0x500      # 1280
 
 # Unsafe weather conditions
 UNSAFE_CONDITIONS = {'Rain', 'Snow', 'Mostly Cloudy', 'Overcast'}
@@ -98,9 +99,9 @@ class AlpacaSafetyMonitor:
     def get_client_params(self) -> tuple:
         """Extract client ID and transaction ID from request with validation"""
         try:
-            # Get raw values
-            client_id_raw = request.args.get('ClientID', '0') or request.form.get('ClientID', '0')
-            client_tx_raw = request.args.get('ClientTransactionID', '0') or request.form.get('ClientTransactionID', '0')
+            # Use case-insensitive retrieval
+            client_id_raw = self._get_arg('ClientID', '0')
+            client_tx_raw = self._get_arg('ClientTransactionID', '0')
             
             # Strip whitespace and convert to string
             client_id_raw = str(client_id_raw).strip()
@@ -208,6 +209,15 @@ class AlpacaSafetyMonitor:
                 state.append({"Name": "LastUpdate", "Value": datetime.utcnow().isoformat() + 'Z'})
             
             return state
+        
+    def _get_arg(self, key: str, default: Any = None) -> str:
+        """Case-insensitive argument retrieval from request values"""
+        # Search in both query args and form data (combined in request.values)
+        key_lower = key.lower()
+        for k, v in request.values.items():
+            if k.lower() == key_lower:
+                return v
+        return default
 
 
 # Flask application setup
@@ -282,22 +292,34 @@ def set_connected(device_number: int):
             error_message=f"Invalid device number: {device_number}",
             client_transaction_id=client_tx_id
         )), 400
+
+    # Strict Boolean Validation
+    connected_str = safety_monitor._get_arg('Connected', '').strip().lower()
     
+    if connected_str == 'true':
+        target_state = True
+    elif connected_str == 'false':
+        target_state = False
+    else:
+        return jsonify(safety_monitor.create_response(
+            error_number=ERROR_INVALID_VALUE,
+            error_message=f"Invalid boolean value for Connected: '{connected_str}'",
+            client_transaction_id=client_tx_id
+        )), 400
+
     try:
-        connected = request.form.get('Connected', '').lower() == 'true'
-        
-        if connected and not safety_monitor.connected:
+        if target_state and not safety_monitor.connected:
             safety_monitor.connect()
-        elif not connected and safety_monitor.connected:
+        elif not target_state and safety_monitor.connected:
             safety_monitor.disconnect()
         
         return jsonify(safety_monitor.create_response(
             client_transaction_id=client_tx_id
         ))
     except Exception as e:
-        logger.error(f"Error setting connection state: {e}")
+        logger.error(f"Failed to set connected state: {e}")
         return jsonify(safety_monitor.create_response(
-            error_number=0x500,
+            error_number=ERROR_UNSPECIFIED,
             error_message=str(e),
             client_transaction_id=client_tx_id
         )), 500
@@ -505,23 +527,27 @@ def get_apiversions():
 @app.route('/management/v1/description', methods=['GET'])
 def get_management_description():
     """Get server description"""
-    return jsonify({
+    value = {
         "ServerName": "Cloud Detection Safety Monitor",
         "Manufacturer": "Open Source",
         "ManufacturerVersion": "1.0",
         "Location": "Cloud"
-    })
+    }
+    # MUST wrap in create_response
+    return jsonify(safety_monitor.create_response(value=value))
 
 
 @app.route('/management/v1/configureddevices', methods=['GET'])
 def get_configured_devices():
     """Get list of configured devices"""
-    return jsonify([{
+    value = [{
         "DeviceName": safety_monitor.alpaca_config.device_name,
         "DeviceType": "SafetyMonitor",
         "DeviceNumber": safety_monitor.alpaca_config.device_number,
         "UniqueID": "cloud-safety-monitor-0"
-    }])
+    }]
+    # MUST wrap in create_response
+    return jsonify(safety_monitor.create_response(value=value))
 
 
 class AlpacaDiscovery:
