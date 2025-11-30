@@ -2,8 +2,10 @@
 
 import logging
 import os
+import socket
 import time
 import json
+import gc
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,6 +90,8 @@ class CloudDetector:
         
         try:
             client.connect(self.config.broker, self.config.port)
+            # Start background network loop to handle keepalive pings and reconnections
+            client.loop_start()
             logger.info(f"Connected to MQTT broker at {self.config.broker}:{self.config.port}")
             return client
         except Exception as e:
@@ -172,6 +176,7 @@ class CloudDetector:
             try:
                 result = self.detect()
                 self.publish_result(result)
+                gc.collect()
                 time.sleep(self.config.detect_interval)
             except Exception as e:
                 logger.error(f"Error in detection loop: {e}")
@@ -179,6 +184,9 @@ class CloudDetector:
 
 def main():
     """Main entry point"""
+    # Set global socket timeout to prevent network operations from hanging indefinitely
+    socket.setdefaulttimeout(30)
+    
     try:
         config = Config.from_env()
         detector = CloudDetector(config)
