@@ -13,6 +13,7 @@ The SafetyMonitor integrates with the existing cloud detection system to provide
 
 - ✅ Full ASCOM Alpaca API compliance (ISafetyMonitorV1)
 - ✅ RESTful HTTP interface on port 11111 (configurable)
+- ✅ **Automatic device discovery via UDP (port 32227)**
 - ✅ Continuous cloud monitoring with configurable update intervals
 - ✅ Thread-safe operations
 - ✅ Comprehensive error handling
@@ -140,6 +141,56 @@ Response:
 - **GET** `/management/apiversions` - Supported API versions
 - **GET** `/management/v1/description` - Server description
 - **GET** `/management/v1/configureddevices` - List of devices
+
+## Device Discovery
+
+The server implements the ASCOM Alpaca UDP Discovery Protocol, allowing ASCOM clients to automatically find the device on the network without manual configuration.
+
+### How Discovery Works
+
+1. **Client broadcasts** a UDP discovery request (`alpacadiscovery1`) to port **32227**
+2. **Server responds** with its Alpaca API port number (11111 by default)
+3. **Client connects** to the HTTP API using the discovered port
+
+### Discovering the Device
+
+Most ASCOM clients (NINA, SGP, etc.) automatically discover Alpaca devices. If your client supports discovery:
+
+1. Start the SafetyMonitor server
+2. Use your client's "Discover Devices" or "Scan Network" feature
+3. The "Cloud Detection Safety Monitor" should appear automatically
+4. Select it and connect
+
+### Manual Discovery Test
+
+You can test discovery manually using Python:
+
+```python
+import socket
+import json
+
+# Create UDP socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.settimeout(2)
+
+# Send discovery request (broadcast)
+sock.sendto(b"alpacadiscovery1", ("<broadcast>", 32227))
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+# Receive response
+try:
+    data, addr = sock.recvfrom(1024)
+    response = json.loads(data)
+    print(f"Found Alpaca server at {addr[0]}:{response['AlpacaPort']}")
+except socket.timeout:
+    print("No response - server may not be running")
+```
+
+### Network Requirements
+
+- UDP port **32227** must be accessible for discovery
+- HTTP port **11111** (or configured port) must be accessible for API
+- When using `network_mode: host` in Docker, both ports are automatically available
 
 ## ASCOM Client Integration
 
