@@ -98,31 +98,35 @@ class AlpacaSafetyMonitor:
     
     def get_client_params(self) -> tuple:
         """Extract client ID and transaction ID from request with validation"""
+        # Use case-insensitive retrieval
+        client_id_raw = self._get_arg('ClientID', '0')
+        client_tx_raw = self._get_arg('ClientTransactionID', '0')
+        
+        # Strip whitespace and convert to string
+        client_id_raw = str(client_id_raw).strip()
+        client_tx_raw = str(client_tx_raw).strip()
+        
+        # Parse ClientID with fallback to 0
         try:
-            # Use case-insensitive retrieval
-            client_id_raw = self._get_arg('ClientID', '0')
-            client_tx_raw = self._get_arg('ClientTransactionID', '0')
-            
-            # Strip whitespace and convert to string
-            client_id_raw = str(client_id_raw).strip()
-            client_tx_raw = str(client_tx_raw).strip()
-            
-            # Convert to int with validation
             client_id = int(client_id_raw) if client_id_raw else 0
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid ClientID received: {client_id_raw}")
+            client_id = 0
+        
+        # Parse ClientTransactionID with fallback to 0
+        try:
             client_transaction_id = int(client_tx_raw) if client_tx_raw else 0
             
             # Validate ClientTransactionID is unsigned 32-bit (0 to 4294967295)
             # Per ASCOM Alpaca spec, this must be a uint32
             if client_transaction_id < 0 or client_transaction_id > 4294967295:
-                client_transaction_id = 0  # Use 0 for invalid values
-                
-            return client_id, client_transaction_id
-            
+                logger.warning(f"ClientTransactionID out of range: {client_transaction_id}")
+                client_transaction_id = 0
         except (ValueError, TypeError):
-            # Invalid input - return defaults instead of crashing
-            logger.warning(f"Invalid client parameters received: ClientID={request.args.get('ClientID')}, "
-                         f"ClientTransactionID={request.args.get('ClientTransactionID')}")
-            return 0, 0
+            logger.warning(f"Invalid ClientTransactionID received: {client_tx_raw}")
+            client_transaction_id = 0
+            
+        return client_id, client_transaction_id
     
     def _detection_loop(self):
         """Background thread for continuous cloud detection"""
