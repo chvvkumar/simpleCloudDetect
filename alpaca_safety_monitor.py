@@ -583,6 +583,19 @@ def get_configured_devices():
     return jsonify(safety_monitor.create_response(value=value))
 
 
+def get_available_cloud_conditions() -> list:
+    """Load cloud conditions from labels file"""
+    try:
+        label_path = os.getenv('LABEL_PATH', 'labels.txt')
+        with open(label_path, 'r') as f:
+            # Parse labels like "0 Clear" and extract just the class name
+            return [line.strip().split(' ', 1)[1] for line in f.readlines()]
+    except Exception as e:
+        logger.error(f"Failed to load labels: {e}")
+        # Fallback to hardcoded list
+        return ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
+
+
 @app.route('/setup/v1/safetymonitor/<int:device_number>/setup', methods=['GET', 'POST'])
 def setup_device(device_number: int):
     """Setup page for configuring device name and location"""
@@ -604,7 +617,8 @@ def setup_device(device_number: int):
         
         # Handle unsafe conditions checkboxes
         unsafe_conditions = []
-        for condition in ALL_CLOUD_CONDITIONS:
+        all_conditions = get_available_cloud_conditions()  # Use dynamic conditions instead of ALL_CLOUD_CONDITIONS
+        for condition in all_conditions:
             if request.form.get(f'unsafe_{condition}'):
                 unsafe_conditions.append(condition)
         
