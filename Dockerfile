@@ -1,17 +1,42 @@
 # Use the official Python image from the Docker Hub
-FROM python:3.11-slim
+FROM python:3.11-slim as builder
 
-# Set the working directory in the container
+# Set the working directory
 WORKDIR /app
 
-# Copy the requirements file into the container
-COPY requirements.txt .
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install the dependencies
-RUN pip install -U pip && pip install --no-cache-dir -r requirements.txt
+# Copy requirements files
+COPY requirements.txt requirements-arm64.txt ./
 
-# Copy the rest of the application code into the container, excluding keras_model.h5 and labels.txt
-COPY convert.py detect.py ./
+# Install dependencies based on architecture
+ARG TARGETPLATFORM
+RUN pip install --no-cache-dir --upgrade pip && \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        pip install --no-cache-dir -r requirements-arm64.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
-# Run convert.py first, then detect.py
-CMD ["sh", "-c", "python convert.py && python detect.py"]
+# Final stage
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy Python packages and binaries from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
+
+# Make the startup script executable
+RUN chmod +x start_services.sh
+
+# Run the startup script to launch both services
+CMD ["./start_services.sh"]

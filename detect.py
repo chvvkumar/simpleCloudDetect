@@ -36,11 +36,28 @@ class Config:
     detect_interval: int
     mqtt_username: Optional[str]
     mqtt_password: Optional[str]
+    # HA Discovery settings
+    mqtt_discovery_mode: str
+    mqtt_discovery_prefix: str
+    device_name: str
+    device_id: Optional[str]
 
     @classmethod
     def from_env(cls) -> 'Config':
         """Create Config from environment variables with validation"""
-        required_vars = ['IMAGE_URL', 'MQTT_BROKER', 'MQTT_TOPIC', 'DETECT_INTERVAL']
+        discovery_mode = os.getenv('MQTT_DISCOVERY_MODE', 'legacy').lower()
+        
+        # Base required vars for all modes
+        required_vars = ['IMAGE_URL', 'MQTT_BROKER', 'DETECT_INTERVAL']
+        
+        # Legacy mode requires MQTT_TOPIC
+        if discovery_mode == 'legacy':
+            required_vars.append('MQTT_TOPIC')
+        # HA discovery mode requires DEVICE_ID
+        elif discovery_mode == 'homeassistant':
+            if not os.getenv('DEVICE_ID'):
+                raise ValueError("DEVICE_ID is required when MQTT_DISCOVERY_MODE is 'homeassistant'")
+        
         missing = [var for var in required_vars if not os.getenv(var)]
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
@@ -51,11 +68,113 @@ class Config:
             label_path=os.getenv('LABEL_PATH', 'labels.txt'),
             broker=os.environ['MQTT_BROKER'],
             port=int(os.getenv('MQTT_PORT', '1883')),
-            topic=os.environ['MQTT_TOPIC'],
+            topic=os.getenv('MQTT_TOPIC', ''),
             detect_interval=int(os.environ['DETECT_INTERVAL']),
             mqtt_username=os.getenv('MQTT_USERNAME'),
-            mqtt_password=os.getenv('MQTT_PASSWORD')
+            mqtt_password=os.getenv('MQTT_PASSWORD'),
+            mqtt_discovery_mode=discovery_mode,
+            mqtt_discovery_prefix=os.getenv('MQTT_DISCOVERY_PREFIX', 'homeassistant'),
+            device_name=os.getenv('DEVICE_NAME', 'Cloud Detector'),
+            device_id=os.getenv('DEVICE_ID')
         )
+
+class HADiscoveryManager:
+    """Manages Home Assistant MQTT Discovery"""
+    def __init__(self, config: Config, mqtt_client):
+        self.config = config
+        self.mqtt_client = mqtt_client
+        self.device_id = config.device_id
+        self.discovery_prefix = config.mqtt_discovery_prefix
+        self.availability_topic = f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/availability"
+        
+    def get_device_info(self) -> dict:
+        """Get device information dict for HA discovery"""
+        return {
+            "identifiers": [f"clouddetect_{self.device_id}"],
+            "name": self.config.device_name,
+            "manufacturer": "chvvkumar",
+            "model": "ML Cloud Detection",
+            "sw_version": "1.0"
+        }
+    
+    def publish_discovery_configs(self):
+        """Publish discovery configuration for all sensors"""
+        device_info = self.get_device_info()
+        
+        # Cloud Status Sensor
+        status_config = {
+            "name": "Status",
+            "unique_id": f"clouddetect_{self.device_id}_status",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/status/state",
+            "availability_topic": self.availability_topic,
+            "icon": "mdi:weather-cloudy",
+            "device": device_info
+        }
+        self.mqtt_client.publish(
+            f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/status/config",
+            json.dumps(status_config),
+            retain=True
+        )
+        
+        # Confidence Score Sensor
+        confidence_config = {
+            "name": "Confidence",
+            "unique_id": f"clouddetect_{self.device_id}_confidence",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/state",
+            "availability_topic": self.availability_topic,
+            "unit_of_measurement": "%",
+            "icon": "mdi:percent",
+            "device": device_info
+        }
+        self.mqtt_client.publish(
+            f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/config",
+            json.dumps(confidence_config),
+            retain=True
+        )
+        
+        # Detection Time Sensor
+        time_config = {
+            "name": "Detection Time",
+            "unique_id": f"clouddetect_{self.device_id}_detection_time",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/state",
+            "availability_topic": self.availability_topic,
+            "unit_of_measurement": "s",
+            "device_class": "duration",
+            "icon": "mdi:timer",
+            "device": device_info
+        }
+        self.mqtt_client.publish(
+            f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/config",
+            json.dumps(time_config),
+            retain=True
+        )
+        
+        # Publish availability as online
+        self.mqtt_client.publish(self.availability_topic, "online", retain=True)
+        logger.info("Published HA discovery configurations")
+    
+    def publish_states(self, result: dict):
+        """Publish individual sensor states for HA discovery mode"""
+        # Publish cloud status
+        self.mqtt_client.publish(
+            f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/status/state",
+            result["class_name"]
+        )
+        
+        # Publish confidence score
+        self.mqtt_client.publish(
+            f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/state",
+            str(result["confidence_score"])
+        )
+        
+        # Publish detection time
+        self.mqtt_client.publish(
+            f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/state",
+            str(result["Detection Time (Seconds)"])
+        )
+        
+        logger.info(f"Published HA states: {result['class_name']}, {result['confidence_score']}%, {result['Detection Time (Seconds)']}s")
+
 
 class CloudDetector:
     """Main class for cloud detection operations"""
@@ -64,6 +183,12 @@ class CloudDetector:
         self.model = self._load_model()
         self.class_names = self._load_class_names()
         self.mqtt_client = self._setup_mqtt()
+        self.ha_discovery = None
+        
+        # Initialize HA discovery if enabled
+        if self.config.mqtt_discovery_mode == 'homeassistant':
+            self.ha_discovery = HADiscoveryManager(self.config, self.mqtt_client)
+            self.ha_discovery.publish_discovery_configs()
         
     def _load_model(self):
         """Load and return the Keras model"""
@@ -88,11 +213,17 @@ class CloudDetector:
         if self.config.mqtt_username and self.config.mqtt_password:
             client.username_pw_set(self.config.mqtt_username, self.config.mqtt_password)
         
+        # Set Last Will and Testament for HA discovery mode
+        if self.config.mqtt_discovery_mode == 'homeassistant':
+            availability_topic = f"{self.config.mqtt_discovery_prefix}/sensor/clouddetect_{self.config.device_id}/availability"
+            client.will_set(availability_topic, "offline", retain=True)
+        
         try:
             client.connect(self.config.broker, self.config.port)
             # Start background network loop to handle keepalive pings and reconnections
             client.loop_start()
             logger.info(f"Connected to MQTT broker at {self.config.broker}:{self.config.port}")
+            logger.info(f"MQTT Discovery Mode: {self.config.mqtt_discovery_mode}")
             return client
         except Exception as e:
             logger.error(f"Failed to connect to MQTT broker: {e}")
@@ -162,9 +293,14 @@ class CloudDetector:
     def publish_result(self, result: dict):
         """Publish detection result to MQTT"""
         try:
-            json_result = json.dumps(result)
-            self.mqtt_client.publish(self.config.topic, json_result)
-            logger.info(f"Published to {self.config.topic}: {json_result}")
+            if self.config.mqtt_discovery_mode == 'homeassistant':
+                # Use HA discovery publishing
+                self.ha_discovery.publish_states(result)
+            else:
+                # Use legacy single-topic publishing
+                json_result = json.dumps(result)
+                self.mqtt_client.publish(self.config.topic, json_result)
+                logger.info(f"Published to {self.config.topic}: {json_result}")
         except Exception as e:
             logger.error(f"Failed to publish result: {e}")
             raise

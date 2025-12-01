@@ -1,151 +1,372 @@
+# SimpleCloudDetect
 
+A Machine Learning-based cloud detection system for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor integration.
 
-## A simple Machine Learning based Cloud Detection for AllSky Cameras
+[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) [![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) [![Docker Pulls](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls)](https://hub.docker.com/r/chvvkumar/simpleclouddetect)
 
-  This python script will take an image from an AllSky camera, run it through a machine learning model and output cloud status to Home Assistant
+[![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) [![Docker Image Size (dev)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/dev?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect/tags)
+
+[![optimization](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/optimization.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/optimization.yml) [![Docker Image Size (optimization)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/optimization?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect/tags)
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Screenshots](#screenshots)
+- [Docker Installation (Recommended)](#docker-installation-recommended)
+  - [Environment Variables](#environment-variables)
+  - [Docker Run Examples](#docker-run-examples)
+  - [Docker Compose Examples](#docker-compose-examples)
+- [Home Assistant Integration](#home-assistant-integration)
+- [ASCOM Alpaca SafetyMonitor](#ascom-alpaca-safetymonitor)
+- [Manual Installation](#manual-installation-non-docker)
+- [Training Your Own Model](#training-your-own-model)
+- [Recent Changes](#recent-changes)
+
+---
+
+## Features
+
+- **ML Cloud Classification** - Detects Clear, Wisps, Mostly Cloudy, Overcast, Rain, and Snow conditions
+- **Home Assistant Integration** - MQTT Discovery for automatic setup or legacy manual configuration
+- **ASCOM Alpaca SafetyMonitor** - Compatible with N.I.N.A., SGP, TheSkyX, and other astronomy software
+- **Docker Support** - Easy deployment with both services running simultaneously
+- **Flexible Image Sources** - Supports URL-based and local file images
+- **Custom Models** - Bring your own trained model and labels
+- **Confidence Scores** - Includes detection confidence and timing metrics
+
+---
+
+## Quick Start
+
+**Docker (Recommended):**
+
+```shell
+docker run -d --name simple-cloud-detect --network=host \
+  -e IMAGE_URL="http://your-allsky-camera/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DETECT_INTERVAL="60" \
+  -e DEVICE_ID="clouddetect_001" \
+  chvvkumar/simpleclouddetect:latest
+```
+
+That's it! Your device will automatically appear in Home Assistant under **Settings → Devices & Services → MQTT**.
+
+---
 
 ## Screenshots
 
-Clear Skies
-![alt text](/images/HA2.png)
+| Condition | Example |
+|-----------|---------|
+| **Clear Skies** | ![Clear](/images/HA2.png) |
+| **Majority Clouds** | ![Mostly Cloudy](/images/Mostly%20Cloudy.png) |
+| **Wisps of Clouds** | ![Wisps](/images/wisps.png) |
+| **Overcast** | ![Overcast](/images/Overcast.png) |
 
-Majority Clouds
+---
 
-![](/images/Mostly%20Cloudy.png)
+## Docker Installation (Recommended)
 
-Wisps of Clouds
+### Pull the Image
 
-![](/images/wisps.png)
-
-Overcast
-
-![](/images/Overcast.png)
-
-## Docker (preferred method, x86 only at the moment)
-
-DEV Branch
-
-[![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) ![Docker Image Size (dev)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/dev?style=flat&logo=docker&logoSize=auto)
-
-Main branch
-
-[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) ![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto) ![](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls) 
-
-CHANGES:
-- 2025-01-09: Add MQTT authentication, improve logging to be more descriptive
-- 2024-12-16: Add ability to provide a custom model file and labels file to the container via bind mounts on the docker host. This allows the user to supply their own trained model and classification labels instead of using the example model in this repo.
-- 2024-11-19: Add ability to use local images via https://github.com/chvvkumar/simpleCloudDetect/pull/8 .
-- 2024-10-26: Initial release with basic cloud detection functionality.
-
-
-docker run:
 ```shell
 docker pull chvvkumar/simpleclouddetect:latest
+```
 
-# When using an  image from a URL
+### Environment Variables
+
+#### Required Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `IMAGE_URL` | URL or file path to AllSky camera image | `http://allskypi.lan/image.jpg` |
+| `MQTT_BROKER` | MQTT broker address | `192.168.1.250` |
+
+#### Cloud Detection Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MQTT_PORT` | `1883` | MQTT broker port |
+| `MQTT_USERNAME` | - | MQTT authentication username (optional) |
+| `MQTT_PASSWORD` | - | MQTT authentication password (optional) |
+| `DETECT_INTERVAL` | `60` | Detection interval in seconds |
+
+#### MQTT Publishing Modes
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MQTT_DISCOVERY_MODE` | `legacy` | Mode: `legacy` or `homeassistant` |
+
+**Legacy Mode** (manual YAML configuration):
+- `MQTT_TOPIC` - Topic for publishing (e.g., `Astro/SimpleCloudDetect`)
+
+**Home Assistant Discovery Mode** (automatic setup):
+- `DEVICE_ID` - Unique device identifier (e.g., `clouddetect_001`)
+- `DEVICE_NAME` - Custom device name (default: `Cloud Detector`)
+- `MQTT_DISCOVERY_PREFIX` - HA discovery prefix (default: `homeassistant`)
+
+#### ASCOM Alpaca Settings (Optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALPACA_PORT` | `11111` | HTTP API port |
+| `ALPACA_DEVICE_NUMBER` | `0` | Device number |
+| `ALPACA_UPDATE_INTERVAL` | `30` | Update interval in seconds |
+
+> **Note:** For detailed Alpaca configuration, see **[ALPACA_README.md](ALPACA_README.md)**
+
+### Raspberry Pi Support
+
+**Multi-architecture support:** The Docker images are built for both AMD64 (x86_64) and ARM64 (Raspberry Pi 4/5). Docker will automatically pull the correct image for your platform.
+
+For Raspberry Pi, use the same docker commands. The ARM64 build uses full TensorFlow instead of tensorflow-cpu for compatibility.
+
+> **Note:** First run on Raspberry Pi may take longer as it downloads the ARM64 image (~500MB).
+
+### Docker Run Examples
+
+#### Home Assistant Discovery Mode (Recommended)
+
+**With URL-based image:**
+```shell
 docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
-  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DEVICE_ID="clouddetect_001" \
+  -e DEVICE_NAME="AllSky Cloud Detector" \
   -e MQTT_USERNAME="your_username" \
   -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
-  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
-  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
   chvvkumar/simpleclouddetect:latest
 ```
-As an alternative you can mount the image as a volume and reference it with the `IMAGE_URL` environment variable:
+
+**With local file:**
 ```shell
-# When using an  image from a local file path
 docker run -d --name simple-cloud-detect --network=host \
-  -v /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5 \
-  -v /docker/simpleclouddetect/labels.txt:/app/labels.txt \
   -v $HOME/path/to/image.jpg:/tmp/image.jpg \
   -e IMAGE_URL="file:///tmp/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
-  -e MQTT_PORT="1883" \
-  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
-  -e MQTT_USERNAME="your_username" \
-  -e MQTT_PASSWORD="your_password" \
+  -e MQTT_DISCOVERY_MODE="homeassistant" \
   -e DETECT_INTERVAL="60" \
+  -e DEVICE_ID="clouddetect_001" \
   chvvkumar/simpleclouddetect:latest
 ```
 
-docker compose:
+#### Legacy Mode
 
+**With URL-based image:**
 ```shell
-# When using an  image from a URL
-    simpleclouddetect:
-        container_name: simple-cloud-detect
-        network_mode: host
-        environment:
-          - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
-          - MQTT_BROKER=192.168.1.250
-          - MQTT_PORT=1883
-          - MQTT_TOPIC=Astro/SimpleCloudDetect
-          - MQTT_USERNAME=
-          - MQTT_PASSWORD=
-          - DETECT_INTERVAL=60
-        volumes:
-          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
-          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
-        restart: unless-stopped
-        image: chvvkumar/simpleclouddetect:latest
-
-# When using an  image from a local path
-    simpleclouddetect:
-        container_name: simple-cloud-detect
-        network_mode: host
-        environment:
-          - IMAGE_URL=file:///tmp/image.jpg
-          - MQTT_BROKER=192.168.1.250
-          - MQTT_PORT=1883
-          - MQTT_TOPIC=Astro/SimpleCloudDetect
-          - MQTT_USERNAME=
-          - MQTT_PASSWORD=
-          - DETECT_INTERVAL=60
-        volumes:
-          - '$HOME/path/to/image.jpg:/tmp/image.jpg'
-          - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
-          - /docker/simpleclouddetect/labels.txt:/app/labels.txt
-        restart: unless-stopped
-        image: chvvkumar/simpleclouddetect:latest
-```
-## Manual install and run Overview of operations
-
--   Ensure Python and Python-venv are version 3.11
--   Clone repo
--   Update variables
--   Create venv and activate it
--   Install dependencies from requirements.txt
--   Train your model (my model is included but YMMV with it) and copy to the project firectory
--   Configure your settings for image URL, MQTT server and Home Assistant sensors
--   Verify the output is as expected
--   Set the script to run on boot with cron
-
-## Preperation
-
-If required, install python and python-venv with the correct versions
-```shell
-sudo  add-apt-repository  ppa:deadsnakes/ppa
-sudo  apt  update
-sudo  apt  install  python3.11
-sudo  apt  install  python3.11-venv
+docker run -d --name simple-cloud-detect --network=host \
+  -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e DETECT_INTERVAL="60" \
+  -e MQTT_USERNAME="your_username" \
+  -e MQTT_PASSWORD="your_password" \
+  chvvkumar/simpleclouddetect:latest
 ```
 
-Setup folders and venv:
+#### Custom Model Support
+
+To use your own trained model and labels:
+
 ```shell
-cd
-mkdir git
-git clone git@github.com:chvvkumar/simpleCloudDetect.git
+docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/your/keras_model.h5:/app/keras_model.h5 \
+  -v /path/to/your/labels.txt:/app/labels.txt \
+  -e IMAGE_URL="http://allskypi5.lan/image.jpg" \
+  -e MQTT_BROKER="192.168.1.250" \
+  -e DETECT_INTERVAL="60" \
+  -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DEVICE_ID="clouddetect_001" \
+  chvvkumar/simpleclouddetect:latest
+```
+
+### Docker Compose Examples
+
+#### Home Assistant Discovery Mode
+
+```yaml
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    image: chvvkumar/simpleclouddetect:optimization
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - IMAGE_URL=http://localhost/current/resized/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DEVICE_ID=clouddetect001
+      - DEVICE_NAME=AllSkyPi5 Cloud Detector
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - ALPACA_PORT=11111
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
+      - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
+```
+
+#### Legacy Mode
+
+```yaml
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    image: chvvkumar/simpleclouddetect:latest
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=Astro/SimpleCloudDetect
+      - MQTT_USERNAME=your_username
+      - MQTT_PASSWORD=your_password
+      - DETECT_INTERVAL=60
+    volumes:
+      - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
+      - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
+```
+
+#### With Local Image File
+
+```yaml
+services:
+  simpleclouddetect:
+    container_name: simple-cloud-detect
+    image: chvvkumar/simpleclouddetect:latest
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - IMAGE_URL=file:///tmp/image.jpg
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DEVICE_ID=clouddetect_001
+    volumes:
+      - '$HOME/path/to/image.jpg:/tmp/image.jpg'
+    volumes:
+      - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
+      - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
+```
+---
+
+## Home Assistant Integration
+
+### Option 1: MQTT Discovery (Recommended - Zero Configuration)
+
+When using `MQTT_DISCOVERY_MODE=homeassistant`, your device automatically appears in Home Assistant with **no YAML configuration needed**.
+
+**What You Get:**
+- Single device with your custom name
+- Three sensors:
+  - **Cloud Status** - Current sky condition
+  - **Confidence** - Detection confidence (%)
+  - **Detection Time** - Processing time (seconds)
+- Availability tracking (online/offline status)
+- Proper device grouping in HA UI
+
+**Setup Steps:**
+1. Start container with HA discovery mode (see examples above)
+2. In Home Assistant: **Settings → Devices & Services → MQTT**
+3. Your cloud detector appears automatically under "MQTT Devices"
+
+> **Tip:** Use unique `DEVICE_ID` values if you have multiple AllSky cameras
+
+### Option 2: Legacy Mode (Manual Configuration)
+
+For custom setups or backward compatibility, configure sensors manually in `configuration.yaml`:
+
+```yaml
+mqtt:
+  sensor:
+    - name: "Cloud Status"
+      unique_id: cloud_status_sensor_001
+      icon: mdi:clouds
+      state_topic: "Astro/SimpleCloudDetect"
+      value_template: "{{ value_json.class_name }}"
+
+    - name: "Cloud Status Confidence"
+      unique_id: cloud_confidence_sensor_001
+      icon: mdi:percent
+      state_topic: "Astro/SimpleCloudDetect"
+      value_template: "{{ value_json.confidence_score }}"
+      unit_of_measurement: "%"
+
+    - name: "Cloud Detection Time"
+      unique_id: cloud_detection_time_001
+      icon: mdi:timer
+      state_topic: "Astro/SimpleCloudDetect"
+      value_template: "{{ value_json['Detection Time (Seconds)'] }}"
+      unit_of_measurement: "s"
+```
+
+---
+
+## ASCOM Alpaca SafetyMonitor
+
+The container includes an ASCOM Alpaca SafetyMonitor service for astronomy automation software.
+
+### Quick Setup
+
+1. **Start Container** with Alpaca environment variables (included in examples above)
+2. **Access Setup Page**: `http://<your-server-ip>:11111/setup/v1/safetymonitor/0/setup`
+3. **Configure Device**: Set name, location, and unsafe conditions
+4. **Add to Software**: Configure in N.I.N.A., SGP, TheSkyX, etc.
+
+### Supported Software
+
+- N.I.N.A. (Nighttime Imaging 'N' Astronomy)
+- Sequence Generator Pro
+- TheSkyX
+- Any ASCOM Alpaca-compatible application
+
+> **Full Documentation**: See **[ALPACA_README.md](ALPACA_README.md)** for detailed configuration, API reference, and troubleshooting.
+
+---
+
+## Manual Installation (Non-Docker)
+
+### Prerequisites
+
+Ensure Python 3.11 is installed:
+
+```shell
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.11 python3.11-venv
+```
+
+### Installation Steps
+
+1. **Clone Repository**
+```shell
+cd ~
+mkdir -p git
+cd git
+git clone https://github.com/chvvkumar/simpleCloudDetect.git
 cd simpleCloudDetect
-python3.11  -m  venv  env && source  env/bin/activate
-pip  install  --upgrade  pip
-pip  install  -r  requirements.txt
 ```
 
-Update the script `detect.py` with your own settings for these parameters:
+2. **Create Virtual Environment**
+```shell
+python3.11 -m venv env
+source env/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+3. **Configure Settings**
+
+Edit `detect.py` with your settings:
 ```python
 # Define parameters
 image_url = "http://localhost/current/resized/image.jpg"
@@ -155,57 +376,16 @@ topic = "Astro/SimpleCloudDetect"
 detect_interval = 60
 ```
 
-## Training your model
-
-The model I use is included in this repo for testing but it is highly recommended to train your own model with your data from your AllSky camera to get a more reliable prediction.
-
-Head on to: 
-https://teachablemachine.withgoogle.com
-
-and follow the screenshots to generate a model.
-
-![alt text](/images/1.png)
-
-![alt text](/images/2.png)
-
-![alt text](/images/3.png)
-
-![alt text](/images/4.png)
-
-## Prepare the model for use
-
-- Copy the model file to your script folder where `detect.py` is located 
-- Run `python3 convert.py' to convert the model for use
-    ```shell
-    python3 convert.py
-    ```
-
-Run the script to run detection once to test ecverything is working as expected.
+4. **Test Detection**
 ```shell
-python3  detect.py
+python3 detect.py
 ```
 
-If using docker, the container takes care of the conversion step automatically.
-You only need to mount the model files as a volume:
+### Setup as System Service
+
+Enable automatic startup with systemd:
+
 ```shell
-docker run -d --name simple-cloud-detect --network=host \
-  -v $HOME/path/to/keras_model.h5:/app/keras_model.h5 \
-  -v $HOME/path/to/lables.txt:/app/labels.txt \
-  -e IMAGE_URL="http://localhost/current/resized/image.jpg" \
-  -e MQTT_BROKER="192.168.1.250" \
-  -e MQTT_PORT="1883" \
-  -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
-  -e DETECT_INTERVAL="60" \
-  chvvkumar/simpleclouddetect:latest
-```
-
-
-## Setup systemd service to automatically start the script on boot and run as a service
-
-Copy the included service file to the systemd folder and enable it
-```shell
-cd
-cd git/simpleCloudDetect
 sudo cp detect.service /etc/systemd/system/detect.service
 sudo systemctl daemon-reload
 sudo systemctl enable detect.service
@@ -213,53 +393,78 @@ sudo systemctl start detect.service
 sudo systemctl status detect.service
 ```
 
-Exaample output on successful install
-
+**Expected Output:**
 ```shell
-pi@allskypi5:~/git/simpleCloudDetect $ sudo systemctl status detect.service
 ● detect.service - Cloud Detection Service
      Loaded: loaded (/etc/systemd/system/detect.service; enabled; preset: enabled)
      Active: active (running) since Sat 2024-10-26 10:08:08 CDT; 5min ago
    Main PID: 5694 (python)
-      Tasks: 14 (limit: 4443)
-        CPU: 5.493s
-     CGroup: /system.slice/detect.service
-             └─5694 /home/pi/git/simpleCloudDetect/env/bin/python /home/pi/git/simpleCloudDetect/detect.py
-
-Oct 26 10:10:12 allskypi5 python[5694]: [193B blob data]
-Oct 26 10:11:12 allskypi5 python[5694]: Class: Clear Confidence Score: 1.0 Elapsed Time: 0.12
-Oct 26 10:11:12 allskypi5 python[5694]: Published data to MQTT topic: Astro/SimpleCloudDetect Data: {"class_name": "Clear", "confidence_score": 100.0, "Detection Time (Seconds)": 0.12}
-Oct 26 10:11:12 allskypi5 python[5694]: [193B blob data]
-Oct 26 10:12:13 allskypi5 python[5694]: Class: Clear Confidence Score: 1.0 Elapsed Time: 0.11
-Oct 26 10:12:13 allskypi5 python[5694]: Published data to MQTT topic: Astro/SimpleCloudDetect Data: {"class_name": "Clear", "confidence_score": 100.0, "Detection Time (Seconds)": 0.11}
-Oct 26 10:12:13 allskypi5 python[5694]: [193B blob data]
-Oct 26 10:13:13 allskypi5 python[5694]: Class: Clear Confidence Score: 1.0 Elapsed Time: 0.11
-Oct 26 10:13:13 allskypi5 python[5694]: Published data to MQTT topic: Astro/SimpleCloudDetect Data: {"class_name": "Clear", "confidence_score": 100.0, "Detection Time (Seconds)": 0.11}
-Oct 26 10:13:13 allskypi5 python[5694]: [193B blob data]
 ```
 
-## Add sensors to Home Assistant
+---
 
-Add this to your MQTT sensor configuration
-```yaml
-- name: "Cloud Status"
-    unique_id: DXWiwkjvhjhzf7KGwAFDAo7K
-    icon: mdi:clouds
-    state_topic: "Astro/Skytatus"
-    value_template: "{{ value_json.class_name }}"
+## Training Your Own Model
 
-- name: "Cloud Status Confidence"
-    unique_id: tdrgfwkjvhjhzf7KGwAFDAo7K
-    icon: mdi:exclamation
-    state_topic: "Astro/Skytatus"
-    value_template: "{{ value_json.confidence_score | float * 100 }}"
-    unit_of_measurement: "%"
+While an example model is included, **training your own model with your camera's images is highly recommended** for better accuracy.
 
-- name: "Cloud Detection Time"
-    unique_id: dfhfyuyjghjhcjzf7
-    icon: mdi:exclamation
-    state_topic: "Astro/SimpleCloudDetect"
-    value_template: "{{ value_json['Detection Time (Seconds)'] }}"
-    unit_of_measurement: "S"
+### Using Google's Teachable Machine
 
+1. **Go to**: https://teachablemachine.withgoogle.com
+2. **Create a New Image Project**
+3. **Add Classes**: Clear, Wisps, Mostly Cloudy, Overcast, Rain, Snow
+4. **Upload Training Images** from your AllSky camera for each class
+5. **Train Model**
+6. **Export Model**: Select "TensorFlow" → "Keras" format
+7. **Download** both `keras_model.h5` and `labels.txt`
+
+### Training Steps (Visual Guide)
+
+![Step 1](/images/1.png)
+![Step 2](/images/2.png)
+![Step 3](/images/3.png)
+![Step 4](/images/4.png)
+
+### Using Your Custom Model
+
+**For Docker:**
+```shell
+docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/your/keras_model.h5:/app/keras_model.h5 \
+  -v /path/to/your/labels.txt:/app/labels.txt \
+  # ...other environment variables...
+  chvvkumar/simpleclouddetect:latest
 ```
+
+**For Manual Installation:**
+1. Copy `keras_model.h5` and `labels.txt` to your script directory
+2. Convert the model:
+```shell
+python3 convert.py
+```
+3. Test with `python3 detect.py`
+
+> **Note:** Docker containers automatically convert the model on startup.
+
+---
+
+## Recent Changes
+
+- **2025-01-30**: Add Home Assistant MQTT Discovery support for automatic device/entity creation
+- **2025-01-30**: Add ASCOM Alpaca SafetyMonitor implementation
+- **2025-01-09**: Add MQTT authentication support and improved logging
+- **2024-12-16**: Add custom model and labels file support via bind mounts
+- **2024-11-19**: Add local image file support
+- **2024-10-26**: Initial release
+
+---
+
+## Documentation
+
+- **[Main Documentation](readme.md)** - This file
+- **[Alpaca SafetyMonitor Guide](ALPACA_README.md)** - ASCOM Alpaca implementation details
+
+---
+
+## Support
+
+For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/chvvkumar/simpleCloudDetect).
