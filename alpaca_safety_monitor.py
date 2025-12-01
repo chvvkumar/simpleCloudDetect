@@ -97,8 +97,10 @@ class AlpacaSafetyMonitor:
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
         
-        # Initialize cloud detector (will be created when connected)
-        self.cloud_detector: Optional[CloudDetector] = None
+        # Pre-load cloud detector at startup to avoid delays during connection
+        logger.info("Pre-loading ML model...")
+        self.cloud_detector = CloudDetector(self.detect_config)
+        logger.info("ML model loaded successfully")
         
         logger.info(f"Initialized {self.alpaca_config.device_name}")
     
@@ -185,16 +187,10 @@ class AlpacaSafetyMonitor:
             return
         
         try:
-            # Initialize cloud detector
-            self.cloud_detector = CloudDetector(self.detect_config)
-            
-            # Start detection loop
+            # Start detection loop (model is already pre-loaded)
             self.stop_detection.clear()
             self.detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
             self.detection_thread.start()
-            
-            # Perform initial detection
-            time.sleep(1)  # Give thread time to start
             
             self.connected = True
             logger.info("Connected to safety monitor")
@@ -208,13 +204,12 @@ class AlpacaSafetyMonitor:
             return
         
         try:
-            # Stop detection loop
+            # Stop detection loop (keep model loaded for fast reconnection)
             self.stop_detection.set()
             if self.detection_thread:
                 self.detection_thread.join(timeout=5)
             
             self.connected = False
-            self.cloud_detector = None
             logger.info("Disconnected from safety monitor")
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
