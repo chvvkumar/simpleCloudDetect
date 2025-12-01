@@ -19,7 +19,7 @@ namex==0.0.8
 numpy==2.0.2
 opt_einsum==3.4.0
 optree==0.13.0
-packaging==24.1
+packaging==25.0
 paho-mqtt==2.1.0
 pillow==11.0.0
 protobuf==5.28.3
