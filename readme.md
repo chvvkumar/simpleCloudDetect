@@ -377,6 +377,7 @@ docker run -d --name simple-cloud-detect --network=host \
 
 ## Recent Changes
 
+- **2025-01-30**: Add multi-arch support with support for ARM (Raspberry Pi)
 - **2025-01-30**: Add Home Assistant MQTT Discovery support for automatic device/entity creation
 - **2025-01-30**: Add ASCOM Alpaca SafetyMonitor implementation
 - **2025-01-09**: Add MQTT authentication support and improved logging
