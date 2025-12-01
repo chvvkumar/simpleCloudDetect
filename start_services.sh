@@ -16,7 +16,7 @@ gunicorn alpaca_safety_monitor:app \
     --bind 0.0.0.0:${ALPACA_PORT:-11111} \
     --workers 1 \
     --threads 4 \
-    --timeout 120 \
+    --timeout 240 \
     --keep-alive 75 \
     --graceful-timeout 30 \
     --log-level info &
