@@ -791,7 +791,6 @@ class AlpacaDiscovery:
         try:
             # Create UDP socket
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Use SO_REUSEADDR but not SO_REUSEPORT to prevent multiple binds
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
             # Bind to all interfaces on discovery port
@@ -802,12 +801,6 @@ class AlpacaDiscovery:
             self.thread.start()
             
             logger.info(f"Alpaca Discovery service started on UDP port {self.DISCOVERY_PORT}")
-        except OSError as e:
-            if e.errno == 98:  # Address already in use
-                logger.info(f"Discovery service already running on port {self.DISCOVERY_PORT} (another worker has it)")
-            else:
-                logger.error(f"Failed to start discovery service: {e}")
-                logger.warning("Discovery will not be available, but HTTP API will still work")
         except Exception as e:
             logger.error(f"Failed to start discovery service: {e}")
             logger.warning("Discovery will not be available, but HTTP API will still work")
@@ -862,10 +855,6 @@ def create_app():
     import os
     
     global safety_monitor, discovery_service
-    
-    # Only initialize once
-    if safety_monitor is not None:
-        return app
     
     # Load detection configuration
     detect_config = DetectConfig.from_env()

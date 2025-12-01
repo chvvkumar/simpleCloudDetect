@@ -14,9 +14,9 @@ DETECT_PID=$!
 echo "Starting Alpaca SafetyMonitor API server..."
 gunicorn alpaca_safety_monitor:app \
     --bind 0.0.0.0:${ALPACA_PORT:-11111} \
-    --workers 2 \
-    --threads 4 \
-    --timeout 60 \
+    --workers 1 \
+    --threads 8 \
+    --timeout 120 \
     --keep-alive 30 \
     --graceful-timeout 10 \
     --worker-class gthread \
