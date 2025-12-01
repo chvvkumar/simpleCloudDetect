@@ -23,7 +23,7 @@ packaging==24.1
 paho-mqtt==2.1.0
 pillow==11.0.0
 protobuf==5.28.3
-Pygments==2.18.0
+Pygments==2.19.2
 requests==2.32.3
 rich==13.9.3
 six==1.16.0
