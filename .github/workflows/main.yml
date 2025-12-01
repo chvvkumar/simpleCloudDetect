@@ -42,7 +42,7 @@ jobs:
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
       
       # Prevent cache from growing indefinitely
       - name: Move cache
