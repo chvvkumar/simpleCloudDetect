@@ -274,6 +274,7 @@ CORS(app)
 
 # Global safety monitor instance (will be initialized in main)
 safety_monitor: Optional[AlpacaSafetyMonitor] = None
+discovery_service: Optional['AlpacaDiscovery'] = None
 
 
 def validate_device_number(device_number: int) -> Optional[tuple]:
@@ -853,7 +854,11 @@ def create_app():
     """Application factory for gunicorn"""
     import os
     
-    global safety_monitor
+    global safety_monitor, discovery_service
+    
+    # Only initialize once
+    if safety_monitor is not None:
+        return app
     
     # Load detection configuration
     detect_config = DetectConfig.from_env()
@@ -880,8 +885,8 @@ def create_app():
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
     
     # Initialize and start discovery service
-    discovery = AlpacaDiscovery(alpaca_config.port)
-    discovery.start()
+    discovery_service = AlpacaDiscovery(alpaca_config.port)
+    discovery_service.start()
     
     logger.info(f"ASCOM Alpaca SafetyMonitor initialized")
     logger.info(f"Device: {alpaca_config.device_name}")
