@@ -48,6 +48,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://your-allsky-camera/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DETECT_INTERVAL="60" \
   -e DEVICE_ID="clouddetect_001" \
   chvvkumar/simpleclouddetect:latest
 ```
@@ -151,6 +152,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="file:///tmp/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DETECT_INTERVAL="60" \
   -e DEVICE_ID="clouddetect_001" \
   chvvkumar/simpleclouddetect:latest
 ```
@@ -163,6 +165,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
+  -e DETECT_INTERVAL="60" \
   -e MQTT_USERNAME="your_username" \
   -e MQTT_PASSWORD="your_password" \
   chvvkumar/simpleclouddetect:latest
@@ -178,6 +181,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -v /path/to/your/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://allskypi5.lan/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
+  -e DETECT_INTERVAL="60" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
   -e DEVICE_ID="clouddetect_001" \
   chvvkumar/simpleclouddetect:latest
