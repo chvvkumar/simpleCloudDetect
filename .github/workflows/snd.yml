@@ -3,11 +3,10 @@ name: optimization
 on:
   push:
     branches:
-      - "optimizations"
+      - "snd"
     paths-ignore:
       - '*.md'
       - 'images/**'
-      - '.github/copilot-instructions.md'
 
 jobs:
   build:
