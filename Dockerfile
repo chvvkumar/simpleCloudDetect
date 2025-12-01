@@ -7,12 +7,14 @@ WORKDIR /app
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only requirements first for better layer caching
 COPY requirements.txt .
 
-# Install dependencies in a virtual environment
+# Install dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
