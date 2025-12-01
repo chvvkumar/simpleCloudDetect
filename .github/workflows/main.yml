@@ -54,7 +54,7 @@ jobs:
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
       
       - name: Docker Hub Description
-        uses: peter-evans/dockerhub-description@v4
+        uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
