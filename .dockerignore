@@ -1,0 +1,38 @@
+# Git
+.git
+.github
+.gitignore
+
+# Documentation
+*.md
+images/
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model files (users provide their own)
+keras_model.h5
+labels.txt
+
+# Config
+alpaca_config.json
+detect.service

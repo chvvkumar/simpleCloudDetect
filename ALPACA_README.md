@@ -60,6 +60,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e IMAGE_URL="http://your-allsky-camera/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
+  -e DETECT_INTERVAL="60" \
   -e DEVICE_ID="clouddetect_001" \
   -e ALPACA_PORT="11111" \
   chvvkumar/simpleclouddetect:latest
@@ -108,6 +109,9 @@ services:
     environment:
       - IMAGE_URL=http://allskypi.lan/image.jpg
       - MQTT_BROKER=192.168.1.250
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DETECT_INTERVAL=60
+      - DEVICE_ID=clouddetect_001
       - ALPACA_PORT=11111
       - ALPACA_DEVICE_NUMBER=0
       - ALPACA_UPDATE_INTERVAL=30
