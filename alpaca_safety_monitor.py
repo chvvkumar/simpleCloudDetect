@@ -47,9 +47,9 @@ class AlpacaConfig:
     device_number: int = 0
     device_name: str = "SimpleCloudDetect"
     device_description: str = "ASCOM SafetyMonitor based on ML cloud detection"
-    driver_info: str = "ASCOM Alpaca SafetyMonitor v1.0 - Cloud Detection Driver"
-    driver_version: str = "1.0"
-    interface_version: int = 1
+    driver_info: str = "ASCOM Alpaca SafetyMonitor v2.0 - Cloud Detection Driver"
+    driver_version: str = "2.0"
+    interface_version: int = 3  # Changed from 1 to 3
     update_interval: int = 30  # seconds between cloud detection updates
     location: str = "AllSky Camera"
     unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
