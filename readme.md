@@ -6,8 +6,6 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 
 [![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) [![Docker Image Size (dev)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/dev?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect/tags)
 
-[![optimization](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/optimization.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/optimization.yml) [![Docker Image Size (optimization)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/optimization?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect/tags)
-
 ---
 
 ## Table of Contents
