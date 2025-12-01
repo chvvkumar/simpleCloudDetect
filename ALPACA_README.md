@@ -28,7 +28,7 @@ Complete documentation for the ASCOM Alpaca SafetyMonitor implementation in Simp
 The ASCOM Alpaca SafetyMonitor service provides real-time sky condition monitoring for astronomy automation software. It translates ML-based cloud detection results into standard ASCOM SafetyMonitor states, allowing your imaging software to automatically pause or resume operations based on sky conditions.
 
 **Key Features:**
-- Standard ASCOM Alpaca REST API implementation
+- Standard ASCOM Alpaca REST API implementation (Interface Version 3)
 - Configurable unsafe conditions (which sky states trigger "unsafe")
 - Web-based configuration interface
 - Automatic integration with N.I.N.A., SGP, TheSkyX, and other ASCOM clients
@@ -45,7 +45,7 @@ ASCOM Alpaca is a modern, platform-independent protocol for astronomy device con
 - **Multiple simultaneous connections** from different applications
 - **Cross-platform compatibility** without COM/DCOM dependencies
 
-The SafetyMonitor device type allows automation software to monitor environmental conditions and automatically take protective actions when conditions become unsafe.
+The SafetyMonitor device type (Interface Version 3) allows automation software to monitor environmental conditions and automatically take protective actions when conditions become unsafe.
 
 ---
 

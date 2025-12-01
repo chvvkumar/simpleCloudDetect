@@ -13,13 +13,12 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Screenshots](#screenshots)
-- [Docker Installation (Recommended)](#docker-installation-recommended)
+- [Docker Installation](#docker-installation)
   - [Environment Variables](#environment-variables)
   - [Docker Run Examples](#docker-run-examples)
   - [Docker Compose Examples](#docker-compose-examples)
 - [Home Assistant Integration](#home-assistant-integration)
 - [ASCOM Alpaca SafetyMonitor](#ascom-alpaca-safetymonitor)
-- [Manual Installation](#manual-installation-non-docker)
 - [Training Your Own Model](#training-your-own-model)
 - [Recent Changes](#recent-changes)
 
@@ -66,7 +65,7 @@ That's it! Your device will automatically appear in Home Assistant under **Setti
 
 ---
 
-## Docker Installation (Recommended)
+## Docker Installation
 
 ### Pull the Image
 
@@ -311,7 +310,7 @@ mqtt:
 
 ## ASCOM Alpaca SafetyMonitor
 
-The container includes an ASCOM Alpaca SafetyMonitor service for astronomy automation software.
+The container includes an ASCOM Alpaca SafetyMonitor service (Interface Version 3) for astronomy automation software.
 
 ### Quick Setup
 
@@ -328,76 +327,6 @@ The container includes an ASCOM Alpaca SafetyMonitor service for astronomy autom
 - Any ASCOM Alpaca-compatible application
 
 > **Full Documentation**: See **[ALPACA_README.md](ALPACA_README.md)** for detailed configuration, API reference, and troubleshooting.
-
----
-
-## Manual Installation (Non-Docker)
-
-### Prerequisites
-
-Ensure Python 3.11 is installed:
-
-```shell
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install python3.11 python3.11-venv
-```
-
-### Installation Steps
-
-1. **Clone Repository**
-```shell
-cd ~
-mkdir -p git
-cd git
-git clone https://github.com/chvvkumar/simpleCloudDetect.git
-cd simpleCloudDetect
-```
-
-2. **Create Virtual Environment**
-```shell
-python3.11 -m venv env
-source env/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-3. **Configure Settings**
-
-Edit `detect.py` with your settings:
-```python
-# Define parameters
-image_url = "http://localhost/current/resized/image.jpg"
-broker = "192.168.1.250"
-port = 1883
-topic = "Astro/SimpleCloudDetect"
-detect_interval = 60
-```
-
-4. **Test Detection**
-```shell
-python3 detect.py
-```
-
-### Setup as System Service
-
-Enable automatic startup with systemd:
-
-```shell
-sudo cp detect.service /etc/systemd/system/detect.service
-sudo systemctl daemon-reload
-sudo systemctl enable detect.service
-sudo systemctl start detect.service
-sudo systemctl status detect.service
-```
-
-**Expected Output:**
-```shell
-● detect.service - Cloud Detection Service
-     Loaded: loaded (/etc/systemd/system/detect.service; enabled; preset: enabled)
-     Active: active (running) since Sat 2024-10-26 10:08:08 CDT; 5min ago
-   Main PID: 5694 (python)
-```
 
 ---
 
@@ -432,14 +361,6 @@ docker run -d --name simple-cloud-detect --network=host \
   # ...other environment variables...
   chvvkumar/simpleclouddetect:latest
 ```
-
-**For Manual Installation:**
-1. Copy `keras_model.h5` and `labels.txt` to your script directory
-2. Convert the model:
-```shell
-python3 convert.py
-```
-3. Test with `python3 detect.py`
 
 > **Note:** Docker containers automatically convert the model on startup.
 
