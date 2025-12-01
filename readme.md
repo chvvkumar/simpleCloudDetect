@@ -2,9 +2,12 @@
 
 A Machine Learning-based cloud detection system for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor integration.
 
-[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) [![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) [![Docker Pulls](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls)](https://hub.docker.com/r/chvvkumar/simpleclouddetect)
+[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) [![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) 
 
-[![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) [![Docker Image Size (dev)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/dev?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect/tags)
+[![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) [![Docker Pulls](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) 
+
+
+[![Python](https://img.shields.io/badge/Python-3.9+-blue?style=flat&logo=python&logoColor=white)](https://www.python.org/) [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?style=flat&logo=tensorflow)](https://www.tensorflow.org/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Compatible-blue?style=flat&logo=home-assistant)](https://www.home-assistant.io/) [![ASCOM](https://img.shields.io/badge/ASCOM-Alpaca-green?style=flat)](https://ascom-standards.org/)
 
 ---
 
