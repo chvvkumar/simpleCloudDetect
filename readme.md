@@ -2,9 +2,12 @@
 
 A Machine Learning-based cloud detection system for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor integration.
 
-[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) [![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) [![Docker Pulls](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls)](https://hub.docker.com/r/chvvkumar/simpleclouddetect)
+[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) [![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) 
 
-[![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) [![Docker Image Size (dev)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/dev?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect/tags)
+[![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) [![Docker Pulls](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) 
+
+
+[![Python](https://img.shields.io/badge/Python-3.9+-blue?style=flat&logo=python&logoColor=white)](https://www.python.org/) [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?style=flat&logo=tensorflow)](https://www.tensorflow.org/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Compatible-blue?style=flat&logo=home-assistant)](https://www.home-assistant.io/) [![ASCOM](https://img.shields.io/badge/ASCOM-Alpaca-green?style=flat)](https://ascom-standards.org/)
 
 ---
 
@@ -13,13 +16,12 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Screenshots](#screenshots)
-- [Docker Installation (Recommended)](#docker-installation-recommended)
+- [Docker Installation](#docker-installation)
   - [Environment Variables](#environment-variables)
   - [Docker Run Examples](#docker-run-examples)
   - [Docker Compose Examples](#docker-compose-examples)
 - [Home Assistant Integration](#home-assistant-integration)
 - [ASCOM Alpaca SafetyMonitor](#ascom-alpaca-safetymonitor)
-- [Manual Installation](#manual-installation-non-docker)
 - [Training Your Own Model](#training-your-own-model)
 - [Recent Changes](#recent-changes)
 
@@ -66,7 +68,7 @@ That's it! Your device will automatically appear in Home Assistant under **Setti
 
 ---
 
-## Docker Installation (Recommended)
+## Docker Installation
 
 ### Pull the Image
 
@@ -277,6 +279,8 @@ When using `MQTT_DISCOVERY_MODE=homeassistant`, your device automatically appear
 2. In Home Assistant: **Settings → Devices & Services → MQTT**
 3. Your cloud detector appears automatically under "MQTT Devices"
 
+![Home Assistant MQTT Integration](/images/HA_MQTT.jpg)
+
 > **Tip:** Use unique `DEVICE_ID` values if you have multiple AllSky cameras
 
 ### Option 2: Legacy Mode (Manual Configuration)
@@ -311,7 +315,7 @@ mqtt:
 
 ## ASCOM Alpaca SafetyMonitor
 
-The container includes an ASCOM Alpaca SafetyMonitor service for astronomy automation software.
+The container includes an ASCOM Alpaca SafetyMonitor service (Interface Version 3) for astronomy automation software.
 
 ### Quick Setup
 
@@ -320,6 +324,8 @@ The container includes an ASCOM Alpaca SafetyMonitor service for astronomy autom
 3. **Configure Device**: Set name, location, and unsafe conditions
 4. **Add to Software**: Configure in N.I.N.A., SGP, TheSkyX, etc.
 
+![Alpaca Setup Page](/images/setup.jpg)
+
 ### Supported Software
 
 - N.I.N.A. (Nighttime Imaging 'N' Astronomy)
@@ -327,77 +333,9 @@ The container includes an ASCOM Alpaca SafetyMonitor service for astronomy autom
 - TheSkyX
 - Any ASCOM Alpaca-compatible application
 
+![N.I.N.A. Integration](/images/NINA.jpg)
+
 > **Full Documentation**: See **[ALPACA_README.md](ALPACA_README.md)** for detailed configuration, API reference, and troubleshooting.
-
----
-
-## Manual Installation (Non-Docker)
-
-### Prerequisites
-
-Ensure Python 3.11 is installed:
-
-```shell
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install python3.11 python3.11-venv
-```
-
-### Installation Steps
-
-1. **Clone Repository**
-```shell
-cd ~
-mkdir -p git
-cd git
-git clone https://github.com/chvvkumar/simpleCloudDetect.git
-cd simpleCloudDetect
-```
-
-2. **Create Virtual Environment**
-```shell
-python3.11 -m venv env
-source env/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-3. **Configure Settings**
-
-Edit `detect.py` with your settings:
-```python
-# Define parameters
-image_url = "http://localhost/current/resized/image.jpg"
-broker = "192.168.1.250"
-port = 1883
-topic = "Astro/SimpleCloudDetect"
-detect_interval = 60
-```
-
-4. **Test Detection**
-```shell
-python3 detect.py
-```
-
-### Setup as System Service
-
-Enable automatic startup with systemd:
-
-```shell
-sudo cp detect.service /etc/systemd/system/detect.service
-sudo systemctl daemon-reload
-sudo systemctl enable detect.service
-sudo systemctl start detect.service
-sudo systemctl status detect.service
-```
-
-**Expected Output:**
-```shell
-● detect.service - Cloud Detection Service
-     Loaded: loaded (/etc/systemd/system/detect.service; enabled; preset: enabled)
-     Active: active (running) since Sat 2024-10-26 10:08:08 CDT; 5min ago
-   Main PID: 5694 (python)
-```
 
 ---
 
@@ -432,14 +370,6 @@ docker run -d --name simple-cloud-detect --network=host \
   # ...other environment variables...
   chvvkumar/simpleclouddetect:latest
 ```
-
-**For Manual Installation:**
-1. Copy `keras_model.h5` and `labels.txt` to your script directory
-2. Convert the model:
-```shell
-python3 convert.py
-```
-3. Test with `python3 detect.py`
 
 > **Note:** Docker containers automatically convert the model on startup.
 
