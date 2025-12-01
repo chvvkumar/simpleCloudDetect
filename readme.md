@@ -195,21 +195,24 @@ docker run -d --name simple-cloud-detect --network=host \
 services:
   simpleclouddetect:
     container_name: simple-cloud-detect
-    image: chvvkumar/simpleclouddetect:latest
+    image: chvvkumar/simpleclouddetect:optimization
     network_mode: host
     restart: unless-stopped
     environment:
-      - IMAGE_URL=http://allskypi5.lan/current/resized/image.jpg
+      - IMAGE_URL=http://localhost/current/resized/image.jpg
       - MQTT_BROKER=192.168.1.250
       - MQTT_PORT=1883
       - MQTT_DISCOVERY_MODE=homeassistant
-      - DEVICE_ID=clouddetect_001
-      - DEVICE_NAME=AllSky Cloud Detector
-      - MQTT_USERNAME=your_username
-      - MQTT_PASSWORD=your_password
+      - DEVICE_ID=clouddetect001
+      - DEVICE_NAME=AllSkyPi5 Cloud Detector
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
       - DETECT_INTERVAL=60
       - ALPACA_PORT=11111
       - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
+      - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
 
 #### Legacy Mode
@@ -229,6 +232,9 @@ services:
       - MQTT_USERNAME=your_username
       - MQTT_PASSWORD=your_password
       - DETECT_INTERVAL=60
+    volumes:
+      - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
+      - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
 
 #### With Local Image File
@@ -247,27 +253,10 @@ services:
       - DEVICE_ID=clouddetect_001
     volumes:
       - '$HOME/path/to/image.jpg:/tmp/image.jpg'
-```
-
-#### With Custom Model
-
-```yaml
-services:
-  simpleclouddetect:
-    container_name: simple-cloud-detect
-    image: chvvkumar/simpleclouddetect:latest
-    network_mode: host
-    restart: unless-stopped
-    environment:
-      - IMAGE_URL=http://allskypi5.lan/image.jpg
-      - MQTT_BROKER=192.168.1.250
-      - MQTT_DISCOVERY_MODE=homeassistant
-      - DEVICE_ID=clouddetect_001
     volumes:
-      - /docker/simpleclouddetect/keras_model.h5:/app/keras_model.h5
-      - /docker/simpleclouddetect/labels.txt:/app/labels.txt
+      - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
+      - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
-
 ---
 
 ## Home Assistant Integration
