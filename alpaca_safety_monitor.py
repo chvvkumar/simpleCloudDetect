@@ -91,8 +91,14 @@ class AlpacaSafetyMonitor:
         self.connected = False
         self.connecting = False
         
-        # Cloud detection state
-        self.latest_detection: Optional[Dict[str, Any]] = None
+        # Cloud detection state - use single lock for all state
+        self.latest_detection: Optional[Dict[str, Any]] = {
+            'class_name': 'Unknown',
+            'confidence_score': 0.0,
+            'Detection Time (Seconds)': 0.0
+        }
+        self._cached_is_safe = False  # Cache safe status to reduce lock contention
+        self._unsafe_conditions_set = set(alpaca_config.unsafe_conditions)  # Set lookup is O(1)
         self.detection_lock = threading.Lock()
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
@@ -102,30 +108,32 @@ class AlpacaSafetyMonitor:
         self.cloud_detector = CloudDetector(self.detect_config)
         logger.info("ML model loaded successfully")
         
-        # Set initial safe default state (will be updated by first detection)
-        with self.detection_lock:
-            self.latest_detection = {
-                'class_name': 'Unknown',
-                'confidence_score': 0.0,
-                'Detection Time (Seconds)': 0.0
-            }
-        
         # Perform initial detection in background to avoid blocking app startup
-        def initial_detection():
-            try:
-                logger.info("Performing initial detection...")
-                initial_result = self.cloud_detector.detect()
-                with self.detection_lock:
-                    self.latest_detection = initial_result
-                logger.info(f"Initial detection complete: {initial_result['class_name']}")
-            except Exception as e:
-                logger.error(f"Initial detection failed: {e}")
-        
-        # Start background initial detection
-        initial_thread = threading.Thread(target=initial_detection, daemon=True)
-        initial_thread.start()
+        threading.Thread(target=self._initial_detection, daemon=True).start()
         
         logger.info(f"Initialized {self.alpaca_config.device_name}")
+    
+    def _initial_detection(self):
+        """Perform initial detection in background"""
+        try:
+            logger.info("Performing initial detection...")
+            initial_result = self.cloud_detector.detect()
+            with self.detection_lock:
+                self.latest_detection = initial_result
+                self._update_cached_safety(initial_result)
+            logger.info(f"Initial detection complete: {initial_result['class_name']}")
+        except Exception as e:
+            logger.error(f"Initial detection failed: {e}")
+    
+    def _update_cached_safety(self, detection: Dict[str, Any]):
+        """Update cached safety status (assumes lock is held)"""
+        cloud_condition = detection.get('class_name', '')
+        confidence = detection.get('confidence_score', 0.0)
+        self._cached_is_safe = (
+            confidence >= 50.0 and 
+            cloud_condition != 'Unknown' and 
+            cloud_condition not in self._unsafe_conditions_set
+        )
     
     def get_next_transaction_id(self) -> int:
         """Generate next server transaction ID (thread-safe)"""
@@ -192,17 +200,16 @@ class AlpacaSafetyMonitor:
                 result = self.cloud_detector.detect()
                 with self.detection_lock:
                     self.latest_detection = result
+                    self._update_cached_safety(result)
                 logger.info(f"Cloud detection: {result['class_name']} "
                            f"({result['confidence_score']:.1f}%)")
             except Exception as e:
                 logger.error(f"Error in detection loop: {e}")
                 # On error, keep previous detection state
             
-            # Wait for next update - use shorter intervals to prevent worker timeout
-            # Break waiting into 1-second chunks so we can respond to stop signal
-            for _ in range(self.alpaca_config.update_interval):
-                if self.stop_detection.wait(1.0):  # Wait 1 second at a time
-                    break
+            # Wait for next update - check stop signal every second
+            if self.stop_detection.wait(self.alpaca_config.update_interval):
+                break
         
         logger.info("Detection loop stopped")
     
@@ -239,40 +246,17 @@ class AlpacaSafetyMonitor:
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
     
-    def _is_safe_unlocked(self) -> bool:
-        """Internal method: Determine if conditions are safe (assumes lock is held)"""
-        if self.latest_detection is None:
-            # No detection yet - assume unsafe for safety
-            logger.warning("No detection data available, returning unsafe")
-            return False
-        
-        cloud_condition = self.latest_detection.get('class_name', '')
-        
-        # If detection confidence is very low or unknown, treat as unsafe
-        confidence = self.latest_detection.get('confidence_score', 0.0)
-        if confidence < 50.0 or cloud_condition == 'Unknown':
-            logger.warning(f"Low confidence or unknown condition: {cloud_condition} ({confidence}%), returning unsafe")
-            return False
-        
-        is_safe = cloud_condition not in self.alpaca_config.unsafe_conditions
-        
-        logger.debug(f"Safety check: {cloud_condition} -> {'SAFE' if is_safe else 'UNSAFE'}")
-        return is_safe
-    
     def is_safe(self) -> bool:
         """Determine if conditions are safe based on latest detection"""
         with self.detection_lock:
-            return self._is_safe_unlocked()
+            return self._cached_is_safe
     
     def get_device_state(self) -> list:
         """Get current operational state"""
         # Per ASCOM spec: DeviceState should only include operational properties
         # For SafetyMonitor, only IsSafe is operational
         with self.detection_lock:
-            state = [
-                {"Name": "IsSafe", "Value": self._is_safe_unlocked() if self.connected else False}
-            ]
-            return state
+            return [{"Name": "IsSafe", "Value": self._cached_is_safe if self.connected else False}]
         
     def _get_arg(self, key: str, default: Any = None) -> str:
         """Case-insensitive argument retrieval from request values"""
@@ -292,53 +276,59 @@ CORS(app)
 safety_monitor: Optional[AlpacaSafetyMonitor] = None
 
 
-@app.route('/api/v1/safetymonitor/<int:device_number>/issafe', methods=['GET'])
-def get_issafe(device_number: int):
-    """Get safety status"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
+def validate_device_number(device_number: int) -> Optional[tuple]:
+    """Validate device number and return error response if invalid"""
     if device_number != safety_monitor.alpaca_config.device_number:
+        _, client_tx_id = safety_monitor.get_client_params()
         return jsonify(safety_monitor.create_response(
             error_number=ERROR_INVALID_VALUE,
             error_message=f"Invalid device number: {device_number}",
             client_transaction_id=client_tx_id
         )), 400
+    return None
+
+
+def create_simple_get_endpoint(attribute_getter):
+    """Factory for simple GET endpoints that return a config value"""
+    def endpoint(device_number: int):
+        error_response = validate_device_number(device_number)
+        if error_response:
+            return error_response
+        _, client_tx_id = safety_monitor.get_client_params()
+        return jsonify(safety_monitor.create_response(
+            value=attribute_getter(),
+            client_transaction_id=client_tx_id
+        ))
+    return endpoint
+
+
+@app.route('/api/v1/safetymonitor/<int:device_number>/issafe', methods=['GET'])
+def get_issafe(device_number: int):
+    """Get safety status"""
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
+    
+    _, client_tx_id = safety_monitor.get_client_params()
     
     # Per ASCOM spec: Always return a value, never an error
     # If disconnected, return False (unsafe) to protect equipment
-    if not safety_monitor.connected:
-        return jsonify(safety_monitor.create_response(
-            value=False,  # Always unsafe when disconnected
-            client_transaction_id=client_tx_id
-        ))
+    is_safe = safety_monitor.is_safe() if safety_monitor.connected else False
     
-    try:
-        is_safe = safety_monitor.is_safe()
-        return jsonify(safety_monitor.create_response(
-            value=is_safe,
-            client_transaction_id=client_tx_id
-        ))
-    except Exception as e:
-        logger.error(f"Error getting safety status: {e}")
-        return jsonify(safety_monitor.create_response(
-            error_number=0x500,
-            error_message=str(e),
-            client_transaction_id=client_tx_id
-        )), 500
+    return jsonify(safety_monitor.create_response(
+        value=is_safe,
+        client_transaction_id=client_tx_id
+    ))
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/connected', methods=['GET'])
 def get_connected(device_number: int):
     """Get connection state"""
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
+    
     _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
     return jsonify(safety_monitor.create_response(
         value=safety_monitor.connected,
         client_transaction_id=client_tx_id
@@ -348,16 +338,11 @@ def get_connected(device_number: int):
 @app.route('/api/v1/safetymonitor/<int:device_number>/connected', methods=['PUT'])
 def set_connected(device_number: int):
     """Set connection state"""
-    _, client_tx_id = safety_monitor.get_client_params()
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
     
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-
-    # Strict Boolean Validation
+    _, client_tx_id = safety_monitor.get_client_params()
     connected_str = safety_monitor._get_arg('Connected', '').strip().lower()
     
     if connected_str == 'true':
@@ -372,10 +357,8 @@ def set_connected(device_number: int):
         )), 400
 
     try:
-        if target_state and not safety_monitor.connected:
-            safety_monitor.connect()
-        elif not target_state and safety_monitor.connected:
-            safety_monitor.disconnect()
+        if target_state != safety_monitor.connected:
+            safety_monitor.connect() if target_state else safety_monitor.disconnect()
         
         return jsonify(safety_monitor.create_response(
             client_transaction_id=client_tx_id
@@ -392,15 +375,11 @@ def set_connected(device_number: int):
 @app.route('/api/v1/safetymonitor/<int:device_number>/connecting', methods=['GET'])
 def get_connecting(device_number: int):
     """Get connecting state (Platform 7)"""
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
+    
     _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
     return jsonify(safety_monitor.create_response(
         value=safety_monitor.connecting,
         client_transaction_id=client_tx_id
@@ -410,22 +389,15 @@ def get_connecting(device_number: int):
 @app.route('/api/v1/safetymonitor/<int:device_number>/connect', methods=['PUT'])
 def connect_device(device_number: int):
     """Connect to device asynchronously (Platform 7, Interface V3+)"""
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
+    
     _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
     try:
         if not safety_monitor.connected:
             safety_monitor.connect()
-        
-        return jsonify(safety_monitor.create_response(
-            client_transaction_id=client_tx_id
-        ))
+        return jsonify(safety_monitor.create_response(client_transaction_id=client_tx_id))
     except Exception as e:
         logger.error(f"Failed to connect: {e}")
         return jsonify(safety_monitor.create_response(
@@ -438,22 +410,15 @@ def connect_device(device_number: int):
 @app.route('/api/v1/safetymonitor/<int:device_number>/disconnect', methods=['PUT'])
 def disconnect_device(device_number: int):
     """Disconnect from device asynchronously (Platform 7, Interface V3+)"""
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
+    
     _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
     try:
         if safety_monitor.connected:
             safety_monitor.disconnect()
-        
-        return jsonify(safety_monitor.create_response(
-            client_transaction_id=client_tx_id
-        ))
+        return jsonify(safety_monitor.create_response(client_transaction_id=client_tx_id))
     except Exception as e:
         logger.error(f"Error during disconnect: {e}")
         return jsonify(safety_monitor.create_response(
@@ -465,152 +430,47 @@ def disconnect_device(device_number: int):
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/description', methods=['GET'])
 def get_description(device_number: int):
-    """Get device description"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    return jsonify(safety_monitor.create_response(
-        value=safety_monitor.alpaca_config.device_description,
-        client_transaction_id=client_tx_id
-    ))
+    return create_simple_get_endpoint(lambda: safety_monitor.alpaca_config.device_description)(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/devicestate', methods=['GET'])
 def get_devicestate(device_number: int):
-    """Get device state (Platform 7)"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    try:
-        state = safety_monitor.get_device_state()
-        return jsonify(safety_monitor.create_response(
-            value=state,
-            client_transaction_id=client_tx_id
-        ))
-    except Exception as e:
-        logger.error(f"Error getting device state: {e}")
-        return jsonify(safety_monitor.create_response(
-            error_number=0x500,
-            error_message=str(e),
-            client_transaction_id=client_tx_id
-        )), 500
+    return create_simple_get_endpoint(safety_monitor.get_device_state)(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/driverinfo', methods=['GET'])
 def get_driverinfo(device_number: int):
-    """Get driver info"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    return jsonify(safety_monitor.create_response(
-        value=safety_monitor.alpaca_config.driver_info,
-        client_transaction_id=client_tx_id
-    ))
+    return create_simple_get_endpoint(lambda: safety_monitor.alpaca_config.driver_info)(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/driverversion', methods=['GET'])
 def get_driverversion(device_number: int):
-    """Get driver version"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    return jsonify(safety_monitor.create_response(
-        value=safety_monitor.alpaca_config.driver_version,
-        client_transaction_id=client_tx_id
-    ))
+    return create_simple_get_endpoint(lambda: safety_monitor.alpaca_config.driver_version)(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/interfaceversion', methods=['GET'])
 def get_interfaceversion(device_number: int):
-    """Get interface version"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    return jsonify(safety_monitor.create_response(
-        value=safety_monitor.alpaca_config.interface_version,
-        client_transaction_id=client_tx_id
-    ))
+    return create_simple_get_endpoint(lambda: safety_monitor.alpaca_config.interface_version)(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/name', methods=['GET'])
 def get_name(device_number: int):
-    """Get device name"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    return jsonify(safety_monitor.create_response(
-        value=safety_monitor.alpaca_config.device_name,
-        client_transaction_id=client_tx_id
-    ))
+    return create_simple_get_endpoint(lambda: safety_monitor.alpaca_config.device_name)(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/supportedactions', methods=['GET'])
 def get_supportedactions(device_number: int):
-    """Get supported actions"""
-    _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
-    # No custom actions supported
-    return jsonify(safety_monitor.create_response(
-        value=[],
-        client_transaction_id=client_tx_id
-    ))
+    return create_simple_get_endpoint(lambda: [])(device_number)
 
 
 @app.route('/api/v1/safetymonitor/<int:device_number>/action', methods=['PUT'])
 def put_action(device_number: int):
     """Execute custom action (not implemented)"""
+    error_response = validate_device_number(device_number)
+    if error_response:
+        return error_response
+    
     _, client_tx_id = safety_monitor.get_client_params()
-    
-    if device_number != safety_monitor.alpaca_config.device_number:
-        return jsonify(safety_monitor.create_response(
-            error_number=ERROR_INVALID_VALUE,
-            error_message=f"Invalid device number: {device_number}",
-            client_transaction_id=client_tx_id
-        )), 400
-    
     return jsonify(safety_monitor.create_response(
         error_number=ERROR_NOT_IMPLEMENTED,
         error_message="No custom actions are supported",
