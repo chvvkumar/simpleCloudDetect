@@ -102,22 +102,28 @@ class AlpacaSafetyMonitor:
         self.cloud_detector = CloudDetector(self.detect_config)
         logger.info("ML model loaded successfully")
         
-        # Perform initial detection to populate latest_detection BEFORE connection
-        try:
-            logger.info("Performing initial detection...")
-            initial_result = self.cloud_detector.detect()
-            with self.detection_lock:
-                self.latest_detection = initial_result
-            logger.info(f"Initial detection complete: {initial_result['class_name']}")
-        except Exception as e:
-            logger.error(f"Initial detection failed: {e}")
-            # Set a safe default state
-            with self.detection_lock:
-                self.latest_detection = {
-                    'class_name': 'Unknown',
-                    'confidence_score': 0.0,
-                    'Detection Time (Seconds)': 0.0
-                }
+        # Set initial safe default state (will be updated by first detection)
+        with self.detection_lock:
+            self.latest_detection = {
+                'class_name': 'Unknown',
+                'confidence_score': 0.0,
+                'Detection Time (Seconds)': 0.0
+            }
+        
+        # Perform initial detection in background to avoid blocking app startup
+        def initial_detection():
+            try:
+                logger.info("Performing initial detection...")
+                initial_result = self.cloud_detector.detect()
+                with self.detection_lock:
+                    self.latest_detection = initial_result
+                logger.info(f"Initial detection complete: {initial_result['class_name']}")
+            except Exception as e:
+                logger.error(f"Initial detection failed: {e}")
+        
+        # Start background initial detection
+        initial_thread = threading.Thread(target=initial_detection, daemon=True)
+        initial_thread.start()
         
         logger.info(f"Initialized {self.alpaca_config.device_name}")
     
@@ -233,39 +239,39 @@ class AlpacaSafetyMonitor:
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
     
+    def _is_safe_unlocked(self) -> bool:
+        """Internal method: Determine if conditions are safe (assumes lock is held)"""
+        if self.latest_detection is None:
+            # No detection yet - assume unsafe for safety
+            logger.warning("No detection data available, returning unsafe")
+            return False
+        
+        cloud_condition = self.latest_detection.get('class_name', '')
+        
+        # If detection confidence is very low or unknown, treat as unsafe
+        confidence = self.latest_detection.get('confidence_score', 0.0)
+        if confidence < 50.0 or cloud_condition == 'Unknown':
+            logger.warning(f"Low confidence or unknown condition: {cloud_condition} ({confidence}%), returning unsafe")
+            return False
+        
+        is_safe = cloud_condition not in self.alpaca_config.unsafe_conditions
+        
+        logger.debug(f"Safety check: {cloud_condition} -> {'SAFE' if is_safe else 'UNSAFE'}")
+        return is_safe
+    
     def is_safe(self) -> bool:
         """Determine if conditions are safe based on latest detection"""
         with self.detection_lock:
-            if self.latest_detection is None:
-                # No detection yet - assume unsafe for safety
-                logger.warning("No detection data available, returning unsafe")
-                return False
-            
-            cloud_condition = self.latest_detection.get('class_name', '')
-            
-            # If detection confidence is very low or unknown, treat as unsafe
-            confidence = self.latest_detection.get('confidence_score', 0.0)
-            if confidence < 50.0 or cloud_condition == 'Unknown':
-                logger.warning(f"Low confidence or unknown condition: {cloud_condition} ({confidence}%), returning unsafe")
-                return False
-            
-            is_safe = cloud_condition not in self.alpaca_config.unsafe_conditions
-            
-            logger.debug(f"Safety check: {cloud_condition} -> {'SAFE' if is_safe else 'UNSAFE'}")
-            return is_safe
+            return self._is_safe_unlocked()
     
     def get_device_state(self) -> list:
         """Get current operational state"""
+        # Per ASCOM spec: DeviceState should only include operational properties
+        # For SafetyMonitor, only IsSafe is operational
         with self.detection_lock:
             state = [
-                {"Name": "IsSafe", "Value": self.is_safe() if self.connected else False}
+                {"Name": "IsSafe", "Value": self._is_safe_unlocked() if self.connected else False}
             ]
-            
-            if self.latest_detection:
-                state.append({"Name": "CloudCondition", "Value": self.latest_detection.get('class_name', 'Unknown')})
-                state.append({"Name": "Confidence", "Value": self.latest_detection.get('confidence_score', 0.0)})
-                state.append({"Name": "LastUpdate", "Value": datetime.utcnow().isoformat() + 'Z'})
-            
             return state
         
     def _get_arg(self, key: str, default: Any = None) -> str:
