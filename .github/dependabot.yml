@@ -12,6 +12,7 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    target-branch: "snd"
 
   # Docker dependencies
   - package-ecosystem: "docker"
@@ -25,6 +26,7 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    target-branch: "snd"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -38,3 +40,4 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    target-branch: "snd"
