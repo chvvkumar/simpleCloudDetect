@@ -374,6 +374,62 @@ def get_connecting(device_number: int):
     ))
 
 
+@app.route('/api/v1/safetymonitor/<int:device_number>/connect', methods=['PUT'])
+def connect_device(device_number: int):
+    """Connect to device asynchronously (Platform 7, Interface V3+)"""
+    _, client_tx_id = safety_monitor.get_client_params()
+    
+    if device_number != safety_monitor.alpaca_config.device_number:
+        return jsonify(safety_monitor.create_response(
+            error_number=ERROR_INVALID_VALUE,
+            error_message=f"Invalid device number: {device_number}",
+            client_transaction_id=client_tx_id
+        )), 400
+    
+    try:
+        if not safety_monitor.connected:
+            safety_monitor.connect()
+        
+        return jsonify(safety_monitor.create_response(
+            client_transaction_id=client_tx_id
+        ))
+    except Exception as e:
+        logger.error(f"Failed to connect: {e}")
+        return jsonify(safety_monitor.create_response(
+            error_number=ERROR_UNSPECIFIED,
+            error_message=str(e),
+            client_transaction_id=client_tx_id
+        )), 500
+
+
+@app.route('/api/v1/safetymonitor/<int:device_number>/disconnect', methods=['PUT'])
+def disconnect_device(device_number: int):
+    """Disconnect from device asynchronously (Platform 7, Interface V3+)"""
+    _, client_tx_id = safety_monitor.get_client_params()
+    
+    if device_number != safety_monitor.alpaca_config.device_number:
+        return jsonify(safety_monitor.create_response(
+            error_number=ERROR_INVALID_VALUE,
+            error_message=f"Invalid device number: {device_number}",
+            client_transaction_id=client_tx_id
+        )), 400
+    
+    try:
+        if safety_monitor.connected:
+            safety_monitor.disconnect()
+        
+        return jsonify(safety_monitor.create_response(
+            client_transaction_id=client_tx_id
+        ))
+    except Exception as e:
+        logger.error(f"Error during disconnect: {e}")
+        return jsonify(safety_monitor.create_response(
+            error_number=ERROR_UNSPECIFIED,
+            error_message=str(e),
+            client_transaction_id=client_tx_id
+        )), 500
+
+
 @app.route('/api/v1/safetymonitor/<int:device_number>/description', methods=['GET'])
 def get_description(device_number: int):
     """Get device description"""
