@@ -511,7 +511,7 @@ def get_management_description():
     value = {
         "ServerName": safety_monitor.alpaca_config.device_name,
         "Manufacturer": "chvvkumar",
-        "ManufacturerVersion": "1.0",
+        "ManufacturerVersion": safety_monitor.alpaca_config.driver_version,
         "Location": safety_monitor.alpaca_config.location
     }
     # MUST wrap in create_response
