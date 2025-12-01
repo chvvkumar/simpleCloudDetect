@@ -1,16 +1,30 @@
 # Use the official Python image from the Docker Hub
-FROM python:3.11-slim
+FROM python:3.11-slim as builder
 
-# Set the working directory in the container
+# Set the working directory
 WORKDIR /app
 
-# Copy the requirements file into the container
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first for better layer caching
 COPY requirements.txt .
 
-# Install the dependencies
-RUN pip install -U pip && pip install --no-cache-dir -r requirements.txt
+# Install dependencies in a virtual environment
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code into the container, excluding keras_model.h5 and labels.txt
+# Final stage
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+
+# Copy application code
 COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
 
 # Make the startup script executable
