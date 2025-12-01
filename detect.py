@@ -92,7 +92,7 @@ class HADiscoveryManager:
         return {
             "identifiers": [f"clouddetect_{self.device_id}"],
             "name": self.config.device_name,
-            "manufacturer": "SimpleCloudDetect",
+            "manufacturer": "chvvkumar",
             "model": "ML Cloud Detection",
             "sw_version": "1.0"
         }
@@ -103,7 +103,7 @@ class HADiscoveryManager:
         
         # Cloud Status Sensor
         status_config = {
-            "name": f"{self.config.device_name} Status",
+            "name": "Status",
             "unique_id": f"clouddetect_{self.device_id}_status",
             "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/status/state",
             "availability_topic": self.availability_topic,
@@ -118,7 +118,7 @@ class HADiscoveryManager:
         
         # Confidence Score Sensor
         confidence_config = {
-            "name": f"{self.config.device_name} Confidence",
+            "name": "Confidence",
             "unique_id": f"clouddetect_{self.device_id}_confidence",
             "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/state",
             "availability_topic": self.availability_topic,
@@ -134,7 +134,7 @@ class HADiscoveryManager:
         
         # Detection Time Sensor
         time_config = {
-            "name": f"{self.config.device_name} Detection Time",
+            "name": "Detection Time",
             "unique_id": f"clouddetect_{self.device_id}_detection_time",
             "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/state",
             "availability_topic": self.availability_topic,
