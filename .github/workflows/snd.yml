@@ -3,7 +3,7 @@ name: optimization
 on:
   push:
     branches:
-      - "optimizations"
+      - "snd"
     paths-ignore:
       - '*.md'
       - 'images/**'
