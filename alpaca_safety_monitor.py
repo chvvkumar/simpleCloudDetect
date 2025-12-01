@@ -223,10 +223,10 @@ class AlpacaSafetyMonitor:
             return
         
         try:
-            # Stop detection loop (keep model loaded for fast reconnection)
+            # Signal detection loop to stop (non-blocking)
             self.stop_detection.set()
-            if self.detection_thread:
-                self.detection_thread.join(timeout=5)
+            # Don't wait for thread to join - let it stop asynchronously
+            # Thread is daemon so it will terminate when program exits
             
             self.connected = False
             logger.info("Disconnected from safety monitor")
