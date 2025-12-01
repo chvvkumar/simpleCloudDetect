@@ -11,12 +11,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only requirements first for better layer caching
-COPY requirements.txt .
+# Copy requirements files
+COPY requirements.txt requirements-arm64.txt ./
 
-# Install dependencies
+# Install dependencies based on architecture
+ARG TARGETPLATFORM
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        pip install --no-cache-dir -r requirements-arm64.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 # Final stage
 FROM python:3.11-slim

@@ -117,6 +117,14 @@ docker pull chvvkumar/simpleclouddetect:latest
 
 > **Note:** For detailed Alpaca configuration, see **[ALPACA_README.md](ALPACA_README.md)**
 
+### Raspberry Pi Support
+
+**Multi-architecture support:** The Docker images are built for both AMD64 (x86_64) and ARM64 (Raspberry Pi 4/5). Docker will automatically pull the correct image for your platform.
+
+For Raspberry Pi, use the same docker commands. The ARM64 build uses full TensorFlow instead of tensorflow-cpu for compatibility.
+
+> **Note:** First run on Raspberry Pi may take longer as it downloads the ARM64 image (~500MB).
+
 ### Docker Run Examples
 
 #### Home Assistant Discovery Mode (Recommended)

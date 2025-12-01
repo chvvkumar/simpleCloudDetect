@@ -18,6 +18,9 @@ jobs:
         with:
           ref: dev
       
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
@@ -44,7 +47,7 @@ jobs:
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:dev
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
       
       - name: Move cache
         run: |

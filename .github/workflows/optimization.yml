@@ -18,6 +18,9 @@ jobs:
         with:
           ref: optimizations
       
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
@@ -46,7 +49,7 @@ jobs:
             ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:opt-${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           build-args: |
             BUILDKIT_INLINE_CACHE=1
       
