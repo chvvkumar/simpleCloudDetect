@@ -7,7 +7,6 @@ on:
     paths-ignore:
       - '*.md'
       - 'images/**'
-      - '.github/copilot-instructions.md'
 
 jobs:
   build:
