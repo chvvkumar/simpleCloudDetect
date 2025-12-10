@@ -1,5 +1,5 @@
 # Use the official Python image from the Docker Hub
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # Set the working directory
 WORKDIR /app

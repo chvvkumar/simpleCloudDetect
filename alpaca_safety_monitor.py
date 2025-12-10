@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 import json
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_cors import CORS
 
 from detect import CloudDetector, Config as DetectConfig
@@ -578,10 +578,11 @@ def setup_device(device_number: int):
         # Save configuration to file
         safety_monitor.alpaca_config.save_to_file()
         
-        # Return success message
-        message = "Configuration updated successfully!"
-    else:
-        message = ""
+        # Redirect to prevent form resubmission (Post/Redirect/Get pattern)
+        return redirect(url_for('setup_device', device_number=device_number))
+    
+    # GET request - show the form
+    message = ""
     
     # HTML form for setup
     html_template = """
