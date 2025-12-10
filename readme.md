@@ -195,7 +195,7 @@ docker run -d --name simple-cloud-detect --network=host \
 services:
   simpleclouddetect:
     container_name: simple-cloud-detect
-    image: chvvkumar/simpleclouddetect:optimization
+    image: chvvkumar/simpleclouddetect:latest
     network_mode: host
     restart: unless-stopped
     environment:
