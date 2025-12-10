@@ -550,6 +550,9 @@ def setup_device(device_number: int):
     if device_number != safety_monitor.alpaca_config.device_number:
         return jsonify({"error": "Invalid device number"}), 404
     
+    # Get available conditions from labels.txt - used by both GET and POST
+    all_available_conditions = get_available_cloud_conditions()
+    
     if request.method == 'POST':
         # Handle form submission
         device_name = request.form.get('device_name', '').strip()
@@ -565,8 +568,7 @@ def setup_device(device_number: int):
         
         # Handle unsafe conditions checkboxes
         unsafe_conditions = []
-        all_conditions = get_available_cloud_conditions()  # Use dynamic conditions instead of ALL_CLOUD_CONDITIONS
-        for condition in all_conditions:
+        for condition in all_available_conditions:
             if request.form.get(f'unsafe_{condition}'):
                 unsafe_conditions.append(condition)
         
@@ -587,173 +589,247 @@ def setup_device(device_number: int):
     <html>
     <head>
         <title>SimpleCloudDetect Setup</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
         <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
             body {
-                font-family: Arial, sans-serif;
-                max-width: 700px;
-                margin: 50px auto;
+                font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                min-height: 100vh;
                 padding: 20px;
-                background-color: #f5f5f5;
+                color: #e4e4e4;
             }
             .container {
-                background-color: white;
-                padding: 30px;
-                border-radius: 8px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                max-width: 700px;
+                margin: 50px auto;
+                background: #1e1e1e;
+                border-radius: 12px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 32px 30px;
+                text-align: center;
             }
             h1 {
-                color: #333;
-                border-bottom: 2px solid #4CAF50;
-                padding-bottom: 10px;
+                color: #ffffff;
+                font-size: 28px;
+                font-weight: 500;
+                letter-spacing: 0.5px;
+                margin: 0;
+            }
+            .content {
+                padding: 30px;
             }
             h2 {
-                color: #555;
+                color: #bb86fc;
                 margin-top: 30px;
                 margin-bottom: 15px;
                 font-size: 18px;
+                font-weight: 500;
+                letter-spacing: 0.25px;
             }
             .form-group {
-                margin-bottom: 20px;
+                margin-bottom: 24px;
             }
             label {
                 display: block;
-                margin-bottom: 5px;
-                color: #555;
-                font-weight: bold;
+                margin-bottom: 8px;
+                color: #b3b3b3;
+                font-weight: 500;
+                font-size: 14px;
+                letter-spacing: 0.15px;
             }
             input[type="text"] {
                 width: 100%;
-                padding: 10px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                box-sizing: border-box;
-                font-size: 14px;
+                padding: 14px 16px;
+                background: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 8px;
+                color: #e4e4e4;
+                font-size: 15px;
+                font-family: 'Roboto', sans-serif;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             }
             input[type="text"]:focus {
                 outline: none;
-                border-color: #4CAF50;
+                border-color: #bb86fc;
+                background: #333333;
+                box-shadow: 0 0 0 3px rgba(187, 134, 252, 0.1);
+            }
+            input[type="text"]::placeholder {
+                color: #666666;
             }
             .checkbox-group {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 10px;
-                padding: 15px;
-                background-color: #f9f9f9;
-                border-radius: 4px;
-                border: 1px solid #ddd;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 12px;
+                padding: 20px;
+                background: #2d2d2d;
+                border-radius: 8px;
+                border: 1px solid #3d3d3d;
             }
             .checkbox-item {
                 display: flex;
                 align-items: center;
+                padding: 10px 12px;
+                background: #333333;
+                border-radius: 6px;
+                transition: all 0.2s ease;
+            }
+            .checkbox-item:hover {
+                background: #3a3a3a;
+                transform: translateX(2px);
             }
             .checkbox-item input[type="checkbox"] {
-                margin-right: 8px;
-                width: 18px;
-                height: 18px;
+                margin-right: 12px;
+                width: 20px;
+                height: 20px;
                 cursor: pointer;
+                accent-color: #bb86fc;
             }
             .checkbox-item label {
                 margin: 0;
-                font-weight: normal;
+                font-weight: 400;
                 cursor: pointer;
+                color: #e4e4e4;
+                font-size: 15px;
             }
             button {
-                background-color: #4CAF50;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
-                padding: 12px 30px;
+                padding: 14px 32px;
                 border: none;
-                border-radius: 4px;
+                border-radius: 8px;
                 cursor: pointer;
                 font-size: 16px;
+                font-weight: 500;
                 width: 100%;
-                margin-top: 20px;
+                margin-top: 24px;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
             }
             button:hover {
-                background-color: #45a049;
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            }
+            button:active {
+                transform: translateY(0);
             }
             .message {
-                background-color: #d4edda;
-                color: #155724;
-                padding: 12px;
-                border-radius: 4px;
-                margin-bottom: 20px;
-                border: 1px solid #c3e6cb;
+                background: linear-gradient(135deg, #03dac6 0%, #018786 100%);
+                color: #000000;
+                padding: 16px 20px;
+                border-radius: 8px;
+                margin-bottom: 24px;
+                font-weight: 500;
+                box-shadow: 0 4px 12px rgba(3, 218, 198, 0.2);
+                animation: slideIn 0.3s ease;
+            }
+            @keyframes slideIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
             }
             .info {
-                background-color: #e7f3ff;
-                padding: 15px;
-                border-radius: 4px;
-                margin-bottom: 20px;
-                border-left: 4px solid #2196F3;
+                background: #2d2d2d;
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 24px;
+                border-left: 4px solid #bb86fc;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
             }
             .info p {
-                margin: 5px 0;
-                color: #555;
+                margin: 8px 0;
+                color: #b3b3b3;
+                line-height: 1.6;
+            }
+            .info strong {
+                color: #e4e4e4;
+                font-weight: 500;
             }
             .help-text {
                 font-size: 13px;
-                color: #666;
-                margin-top: 5px;
+                color: #888888;
+                margin-top: 8px;
                 font-style: italic;
+                letter-spacing: 0.1px;
             }
             .safe-indicator {
-                color: #4CAF50;
-                font-weight: bold;
+                color: #03dac6;
+                font-weight: 500;
             }
             .unsafe-indicator {
-                color: #f44336;
-                font-weight: bold;
+                color: #cf6679;
+                font-weight: 500;
             }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>SimpleCloudDetect Setup</h1>
-            
-            {% if message %}
-            <div class="message">{{ message }}</div>
-            {% endif %}
-            
-            <div class="info">
-                <p><strong>Current Configuration:</strong></p>
-                <p>Device Name: {{ current_name }}</p>
-                <p>Location: {{ current_location }}</p>
-                <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
-                <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
+            <div class="header">
+                <h1>☁️ SimpleCloudDetect Setup</h1>
             </div>
             
-            <form method="POST">
-                <div class="form-group">
-                    <label for="device_name">Device Name:</label>
-                    <input type="text" id="device_name" name="device_name" 
-                           value="{{ current_name }}" placeholder="Enter device name">
+            <div class="content">
+                {% if message %}
+                <div class="message">✓ {{ message }}</div>
+                {% endif %}
+                
+                <div class="info">
+                    <p><strong>Current Configuration:</strong></p>
+                    <p>Device Name: {{ current_name }}</p>
+                    <p>Location: {{ current_location }}</p>
+                    <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
+                    <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
                 </div>
                 
-                <div class="form-group">
-                    <label for="location">Location:</label>
-                    <input type="text" id="location" name="location" 
-                           value="{{ current_location }}" placeholder="Enter location">
-                </div>
-                
-                <div class="form-group">
-                    <h2>Safety Configuration</h2>
-                    <label>Mark conditions that are UNSAFE for observing:</label>
-                    <div class="help-text">Unchecked conditions will be considered SAFE</div>
-                    <div class="checkbox-group">
-                        {% for condition in all_conditions %}
-                        <div class="checkbox-item">
-                            <input type="checkbox" 
-                                   id="unsafe_{{ condition }}" 
-                                   name="unsafe_{{ condition }}"
-                                   {% if condition in unsafe_conditions %}checked{% endif %}>
-                            <label for="unsafe_{{ condition }}">{{ condition }}</label>
-                        </div>
-                        {% endfor %}
+                <form method="POST">
+                    <div class="form-group">
+                        <label for="device_name">Device Name</label>
+                        <input type="text" id="device_name" name="device_name" 
+                               value="{{ current_name }}" placeholder="Enter device name">
                     </div>
-                </div>
-                
-                <button type="submit">Save Configuration</button>
-            </form>
+                    
+                    <div class="form-group">
+                        <label for="location">Location</label>
+                        <input type="text" id="location" name="location" 
+                               value="{{ current_location }}" placeholder="Enter location">
+                    </div>
+                    
+                    <div class="form-group">
+                        <h2>Safety Configuration</h2>
+                        <label>Mark conditions that are UNSAFE for observing</label>
+                        <div class="help-text">Unchecked conditions will be considered SAFE</div>
+                        <div class="checkbox-group">
+                            {% for condition in all_conditions %}
+                            <div class="checkbox-item">
+                                <input type="checkbox" 
+                                       id="unsafe_{{ condition }}" 
+                                       name="unsafe_{{ condition }}"
+                                       {% if condition in unsafe_conditions %}checked{% endif %}>
+                                <label for="unsafe_{{ condition }}">{{ condition }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <button type="submit">Save Configuration</button>
+                </form>
+            </div>
         </div>
     </body>
     </html>
@@ -761,14 +837,14 @@ def setup_device(device_number: int):
     
     # Calculate safe vs unsafe conditions for display
     unsafe_conditions = safety_monitor.alpaca_config.unsafe_conditions
-    safe_conditions = [c for c in ALL_CLOUD_CONDITIONS if c not in unsafe_conditions]
+    safe_conditions = [c for c in all_available_conditions if c not in unsafe_conditions]
     
     return render_template_string(
         html_template,
         message=message,
         current_name=safety_monitor.alpaca_config.device_name,
         current_location=safety_monitor.alpaca_config.location,
-        all_conditions=ALL_CLOUD_CONDITIONS,
+        all_conditions=all_available_conditions,
         unsafe_conditions=unsafe_conditions,
         safe_conditions=safe_conditions
     )
