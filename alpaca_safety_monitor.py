@@ -573,6 +573,8 @@ def setup_device(device_number: int):
                 unsafe_conditions.append(condition)
         
         safety_monitor.alpaca_config.unsafe_conditions = unsafe_conditions
+        # Update the in-memory set to match the new configuration
+        safety_monitor._unsafe_conditions_set = set(unsafe_conditions)
         logger.info(f"Unsafe conditions updated to: {unsafe_conditions}")
         
         # Save configuration to file
