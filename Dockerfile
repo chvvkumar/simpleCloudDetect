@@ -28,6 +28,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser
 
@@ -43,6 +48,10 @@ RUN chmod +x start_services.sh && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
+
+# FIX: Add healthcheck to ensure container restarts if Python process hangs
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:${ALPACA_PORT:-11111}/api/v1/safetymonitor/${ALPACA_DEVICE_NUMBER:-0}/connected || exit 1
 
 # Run the startup script to launch unified service
 CMD ["./start_services.sh"]

@@ -12,6 +12,8 @@ import socket
 import threading
 import time
 import os
+import signal
+import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -120,15 +122,9 @@ class AlpacaSafetyMonitor:
             self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client)
             self.ha_discovery.publish_discovery_configs()
         
-        # Perform initial detection in background to avoid blocking app startup
-        threading.Thread(target=self._initial_detection, daemon=True).start()
-        
-        logger.info(f"Initialized {self.alpaca_config.device_name}")
-    
-    def _initial_detection(self):
-        """Perform initial detection in background"""
+        # FIX: Blocking initial detection to ensure readiness (better than background thread)
+        logger.info("Performing initial detection (blocking)...")
         try:
-            logger.info("Performing initial detection...")
             initial_result = self.cloud_detector.detect()
             initial_result['timestamp'] = datetime.now()
             with self.detection_lock:
@@ -137,6 +133,8 @@ class AlpacaSafetyMonitor:
             logger.info(f"Initial detection complete: {initial_result['class_name']}")
         except Exception as e:
             logger.error(f"Initial detection failed: {e}")
+        
+        logger.info(f"Initialized {self.alpaca_config.device_name}")
     
     def _update_cached_safety(self, detection: Dict[str, Any]):
         """Update cached safety status (assumes lock is held)"""
@@ -174,11 +172,9 @@ class AlpacaSafetyMonitor:
             return None
     
     def get_next_transaction_id(self) -> int:
-        """Generate next server transaction ID (thread-safe)"""
+        """Generate next server transaction ID (thread-safe, wraps at uint32 max)"""
         with self.transaction_lock:
-            self.server_transaction_id += 1
-            if self.server_transaction_id > 4294967295:
-                self.server_transaction_id = 1
+            self.server_transaction_id = (self.server_transaction_id + 1) % 4294967296
             return self.server_transaction_id
     
     def create_response(self, value: Any = None, error_number: int = ERROR_SUCCESS, 
@@ -1200,26 +1196,23 @@ class AlpacaDiscovery:
 
 
 # Initialize application at module level for gunicorn
-def create_app():
-    """Application factory for gunicorn"""
-    import os
+def main():
+    """Main entry point for Waitress-based unified service"""
+    from waitress import serve
     
     global safety_monitor, discovery_service
     
-    # Load detection configuration
+    # 1. Load Configurations
     detect_config = DetectConfig.from_env()
-    
-    # Try to load Alpaca configuration from file first
     alpaca_config = AlpacaConfig.load_from_file()
     
     if alpaca_config is None:
-        # Create default Alpaca configuration if file doesn't exist
+        # Create default config from environment
         alpaca_config = AlpacaConfig(
             port=int(os.getenv('ALPACA_PORT', '11111')),
             device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
             update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
         )
-        # Save default config
         alpaca_config.save_to_file()
     else:
         # Override port settings from environment if provided
@@ -1227,11 +1220,13 @@ def create_app():
         alpaca_config.device_number = int(os.getenv('ALPACA_DEVICE_NUMBER', str(alpaca_config.device_number)))
         alpaca_config.update_interval = int(os.getenv('ALPACA_UPDATE_INTERVAL', str(alpaca_config.update_interval)))
     
-    # Initialize safety monitor
+    # 2. Initialize global safety monitor
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
     
-    # Initialize and start discovery service
-    # Only start if not already running (prevents duplicate discovery in multi-worker scenarios)
+    # 3. Connect (starts the background detection thread)
+    safety_monitor.connect()
+    
+    # 4. Start Discovery Service
     discovery_service = AlpacaDiscovery(alpaca_config.port)
     discovery_service.start()
     
@@ -1241,27 +1236,30 @@ def create_app():
     logger.info(f"Unsafe conditions: {', '.join(alpaca_config.unsafe_conditions)}")
     logger.info(f"Safe conditions: {', '.join([c for c in ALL_CLOUD_CONDITIONS if c not in alpaca_config.unsafe_conditions])}")
     
-    return app
-
-
-def main():
-    """Main entry point for standalone execution"""
-    import os
+    # 5. Setup signal handlers for graceful shutdown
+    def handle_shutdown_signal(signum, frame):
+        logger.info(f"Received shutdown signal ({signum})")
+        try:
+            discovery_service.stop()
+            safety_monitor.disconnect()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        finally:
+            sys.exit(0)
     
-    # Create and configure app
-    application = create_app()
+    signal.signal(signal.SIGTERM, handle_shutdown_signal)
+    signal.signal(signal.SIGINT, handle_shutdown_signal)
     
-    # Get port from environment
-    port = int(os.getenv('ALPACA_PORT', '11111'))
+    # 6. Run Waitress Server (production-ready, single-process, multi-threaded)
+    logger.info(f"Starting Waitress Server on 0.0.0.0:{alpaca_config.port}")
+    logger.info("Press Ctrl+C to stop the server")
     
-    logger.info(f"Starting ASCOM Alpaca SafetyMonitor on port {port}")
-    
-    # Run Flask development server
-    application.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        serve(app, host='0.0.0.0', port=alpaca_config.port, threads=6)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+        handle_shutdown_signal(signal.SIGINT, None)
 
 
 if __name__ == '__main__':
     main()
-else:
-    # When imported by gunicorn, initialize the app
-    app = create_app()

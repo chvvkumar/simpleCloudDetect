@@ -6,6 +6,7 @@ import socket
 import time
 import json
 import gc
+import io
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -231,7 +232,7 @@ class CloudDetector:
             raise
 
     def _load_image(self, image_url: str, max_retries: int = 3) -> Image.Image:
-        """Load and return image from URL or file with retry logic"""
+        """Load and return image from URL or file with retry logic and strict timeouts"""
         for attempt in range(max_retries):
             try:
                 if image_url.startswith("file://"):
@@ -240,17 +241,20 @@ class CloudDetector:
                     file_path = Path(parsed.path.lstrip('/'))  # Remove leading slashes
                     if not file_path.exists():
                         raise FileNotFoundError(f"Image file not found: {file_path}")
-                    return Image.open(file_path).convert("RGB")
+                    with open(file_path, 'rb') as f:
+                        return Image.open(f).convert("RGB")
                 else:
-                    # Handle HTTP URLs using session for connection pooling
-                    response = self.session.get(image_url, timeout=2, stream=True)
-                    response.raise_for_status()
-                    return Image.open(response.raw).convert("RGB")
+                    # FIX: Strict timeout (5s connect, 10s read) and close socket immediately
+                    with self.session.get(image_url, timeout=(5, 10), stream=True) as response:
+                        response.raise_for_status()
+                        # Load into memory buffer to allow socket to close
+                        return Image.open(io.BytesIO(response.content)).convert("RGB")
             except (requests.RequestException, IOError) as e:
                 if attempt == max_retries - 1:  # Last attempt
                     logger.error(f"Failed to load image from {image_url} after {max_retries} attempts: {e}")
                     raise
                 logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+                time.sleep(1)  # Small backoff between retries
 
     def _preprocess_image(self, image: Image.Image) -> np.ndarray:
         """Preprocess image for model input"""
@@ -272,8 +276,24 @@ class CloudDetector:
             # Make prediction
             prediction = self.model.predict(preprocessed_image, verbose=0)
             index = np.argmax(prediction)
-            class_name = self.class_names[index].strip()[2:]  # Remove index and newline
+            
+            # FIX: Robust label parsing - handles "0 Clear" -> "Clear" format
+            if index < len(self.class_names):
+                raw_label = self.class_names[index].strip()
+                # Check if label starts with digit followed by space (e.g., "0 Clear")
+                if " " in raw_label and raw_label.split(" ", 1)[0].isdigit():
+                    class_name = raw_label.split(" ", 1)[1]
+                else:
+                    class_name = raw_label
+            else:
+                class_name = "Unknown"
+            
             confidence_score = float(prediction[0][index])
+            
+            # FIX: Force garbage collection to prevent memory fragmentation on Pi
+            del image
+            del preprocessed_image
+            gc.collect()
             
             elapsed_time = time.time() - start_time
             
