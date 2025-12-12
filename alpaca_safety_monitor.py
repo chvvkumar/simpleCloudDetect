@@ -575,6 +575,11 @@ def setup_device(device_number: int):
         safety_monitor.alpaca_config.unsafe_conditions = unsafe_conditions
         # Update the in-memory set to match the new configuration
         safety_monitor._unsafe_conditions_set = set(unsafe_conditions)
+        
+        # Recalculate cached safety status with new unsafe conditions
+        with safety_monitor.detection_lock:
+            safety_monitor._update_cached_safety(safety_monitor.latest_detection)
+        
         logger.info(f"Unsafe conditions updated to: {unsafe_conditions}")
         
         # Save configuration to file
