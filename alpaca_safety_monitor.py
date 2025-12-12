@@ -90,12 +90,14 @@ class AlpacaSafetyMonitor:
         # Device state
         self.connected = False
         self.connecting = False
+        self.connected_at: Optional[datetime] = None
         
         # Cloud detection state - use single lock for all state
         self.latest_detection: Optional[Dict[str, Any]] = {
             'class_name': 'Unknown',
             'confidence_score': 0.0,
-            'Detection Time (Seconds)': 0.0
+            'Detection Time (Seconds)': 0.0,
+            'timestamp': None
         }
         self._cached_is_safe = False  # Cache safe status to reduce lock contention
         self._unsafe_conditions_set = set(alpaca_config.unsafe_conditions)  # Set lookup is O(1)
@@ -118,6 +120,7 @@ class AlpacaSafetyMonitor:
         try:
             logger.info("Performing initial detection...")
             initial_result = self.cloud_detector.detect()
+            initial_result['timestamp'] = datetime.now()
             with self.detection_lock:
                 self.latest_detection = initial_result
                 self._update_cached_safety(initial_result)
@@ -198,6 +201,7 @@ class AlpacaSafetyMonitor:
             try:
                 # Perform detection in background without blocking API responses
                 result = self.cloud_detector.detect()
+                result['timestamp'] = datetime.now()
                 with self.detection_lock:
                     self.latest_detection = result
                     self._update_cached_safety(result)
@@ -225,6 +229,7 @@ class AlpacaSafetyMonitor:
             self.detection_thread.start()
             
             self.connected = True
+            self.connected_at = datetime.now()
             logger.info("Connected to safety monitor")
         except Exception as e:
             logger.error(f"Failed to connect: {e}")
@@ -242,6 +247,7 @@ class AlpacaSafetyMonitor:
             # Thread is daemon so it will terminate when program exits
             
             self.connected = False
+            self.connected_at = None
             logger.info("Disconnected from safety monitor")
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
@@ -596,152 +602,259 @@ def setup_device(device_number: int):
     <!DOCTYPE html>
     <html>
     <head>
-        <title>SimpleCloudDetect Setup</title>
+        <title>SimpleCloudDetect Setup - Command Center</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
         <style>
+            /* Typography Imports */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+            /* Custom Scrollbar */
+            ::-webkit-scrollbar { width: 6px; }
+            ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.2); }
+            ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.5); border-radius: 4px; }
+            ::-webkit-scrollbar-thumb:hover { background: rgba(71, 85, 105, 0.8); }
+
+            /* Glassmorphism Utility */
+            .glass-panel {
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            /* Input Glow Effect */
+            .glow-input:focus {
+                box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+            }
+
             * {
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
             }
+            
             body {
                 font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                background: #0d1117;
+                background: rgb(2, 6, 23);
                 min-height: 100vh;
                 padding: 20px;
-                color: #c9d1d9;
+                color: rgb(226, 232, 240);
+                position: relative;
             }
+            
+            /* Background Overlay */
+            body::before {
+                content: '';
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: linear-gradient(to right, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.4));
+                pointer-events: none;
+                z-index: 0;
+            }
+            
             .container {
-                max-width: 700px;
+                max-width: 900px;
                 margin: 50px auto;
-                background: #161b22;
-                border-radius: 12px;
-                border: 1px solid #30363d;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-                overflow: hidden;
+                position: relative;
+                z-index: 1;
             }
+            
             .header {
-                background: linear-gradient(135deg, #1f6feb 0%, #0969da 100%);
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
                 padding: 32px 30px;
                 text-align: center;
+                position: relative;
+                margin-bottom: 24px;
+                box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
             }
+            
+            .github-btn {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: rgba(255, 255, 255, 0.05);
+                color: rgb(34, 211, 238);
+                padding: 8px 16px;
+                border-radius: 6px;
+                text-decoration: none;
+                font-size: 13px;
+                font-weight: 500;
+                transition: all 0.3s ease;
+                border: 1px solid rgba(6, 182, 212, 0.3);
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+            
+            .github-btn:hover {
+                background: rgba(6, 182, 212, 0.1);
+                border-color: rgb(6, 182, 212);
+                box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+                transform: translateY(-2px);
+            }
+            
             h1 {
                 color: #ffffff;
-                font-size: 28px;
-                font-weight: 600;
+                font-size: 32px;
+                font-weight: 700;
                 letter-spacing: -0.5px;
                 margin: 0;
+                text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
             }
+            
+            h1 .highlight {
+                color: rgb(34, 211, 238);
+            }
+            
             .content {
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
                 padding: 30px;
+                box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
             }
+            
             h2 {
-                color: #58a6ff;
+                color: rgb(34, 211, 238);
                 margin-top: 30px;
                 margin-bottom: 15px;
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 600;
                 letter-spacing: -0.25px;
+                text-transform: uppercase;
+                font-size: 14px;
+                border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 8px;
             }
+            
             .form-group {
                 margin-bottom: 24px;
             }
+            
             label {
                 display: block;
                 margin-bottom: 8px;
-                color: #8b949e;
+                color: rgb(148, 163, 184);
                 font-weight: 500;
                 font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
             }
+            
             input[type="text"] {
                 width: 100%;
                 padding: 12px 14px;
-                background: #0d1117;
-                border: 1px solid #30363d;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgb(71, 85, 105);
                 border-radius: 6px;
-                color: #c9d1d9;
+                color: rgb(241, 245, 249);
                 font-size: 14px;
                 font-family: 'Inter', sans-serif;
-                transition: all 0.2s ease;
+                transition: all 0.3s ease;
             }
+            
             input[type="text"]:focus {
                 outline: none;
-                border-color: #58a6ff;
-                background: #010409;
-                box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+                border-color: rgb(6, 182, 212);
+                background: rgba(15, 23, 42, 0.8);
+                box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
             }
+            
             input[type="text"]::placeholder {
-                color: #484f58;
+                color: rgb(100, 116, 139);
             }
+            
             .checkbox-group {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 10px;
-                padding: 16px;
-                background: #0d1117;
-                border-radius: 6px;
-                border: 1px solid #30363d;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 12px;
+                padding: 20px;
+                background: rgba(10, 15, 24, 0.9);
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
             }
+            
             .checkbox-item {
                 display: flex;
                 align-items: center;
-                padding: 10px 12px;
-                background: #161b22;
+                padding: 12px 14px;
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
                 border-radius: 6px;
-                border: 1px solid #30363d;
-                transition: all 0.15s ease;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                transition: all 0.3s ease;
             }
+            
             .checkbox-item:hover {
-                background: #1c2128;
-                border-color: #58a6ff;
+                background: rgba(6, 182, 212, 0.1);
+                border-color: rgba(6, 182, 212, 0.5);
+                box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
             }
+            
             .checkbox-item input[type="checkbox"] {
-                margin-right: 10px;
+                margin-right: 12px;
                 width: 18px;
                 height: 18px;
                 cursor: pointer;
-                accent-color: #1f6feb;
+                accent-color: rgb(6, 182, 212);
             }
+            
             .checkbox-item label {
                 margin: 0;
                 font-weight: 400;
                 cursor: pointer;
-                color: #c9d1d9;
+                color: rgb(226, 232, 240);
                 font-size: 14px;
+                text-transform: none;
+                letter-spacing: 0;
             }
+            
             button {
-                background: linear-gradient(180deg, #1f883d 0%, #18692f 100%);
-                color: white;
-                padding: 12px 24px;
+                background: rgb(6, 182, 212);
+                color: rgb(2, 6, 23);
+                padding: 14px 28px;
                 border: none;
                 border-radius: 6px;
                 cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
+                font-size: 15px;
+                font-weight: 700;
                 width: 100%;
                 margin-top: 24px;
-                transition: all 0.2s ease;
-                box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04);
+                transition: all 0.3s ease;
+                box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+                text-transform: uppercase;
+                letter-spacing: 1px;
             }
+            
             button:hover {
-                background: linear-gradient(180deg, #26a148 0%, #1e7e34 100%);
-                box-shadow: 0 4px 12px rgba(31, 136, 61, 0.3);
+                background: rgb(8, 145, 178);
+                box-shadow: 0 0 30px rgba(6, 182, 212, 0.6);
+                transform: translateY(-2px);
             }
+            
             button:active {
                 transform: scale(0.98);
             }
+            
             .message {
-                background: linear-gradient(135deg, #238636 0%, #1f7a32 100%);
-                color: #ffffff;
+                background: rgba(16, 185, 129, 0.1);
+                color: rgb(52, 211, 153);
                 padding: 14px 16px;
                 border-radius: 6px;
                 margin-bottom: 20px;
                 font-weight: 500;
                 font-size: 14px;
-                border: 1px solid #2ea043;
+                border: 1px solid rgba(16, 185, 129, 0.3);
                 animation: slideIn 0.3s ease;
             }
+            
             @keyframes slideIn {
                 from {
                     opacity: 0;
@@ -752,43 +865,89 @@ def setup_device(device_number: int):
                     transform: translateY(0);
                 }
             }
+            
             .info {
-                background: #0d1117;
-                padding: 16px;
-                border-radius: 6px;
-                margin-bottom: 24px;
-                border: 1px solid #30363d;
+                background: rgba(10, 15, 24, 0.9);
+                padding: 18px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
             }
+            
             .info p {
-                margin: 6px 0;
-                color: #8b949e;
-                line-height: 1.6;
+                margin: 8px 0;
+                color: rgb(148, 163, 184);
+                line-height: 1.8;
                 font-size: 14px;
+                font-family: 'JetBrains Mono', monospace;
             }
+            
             .info strong {
-                color: #c9d1d9;
+                color: rgb(226, 232, 240);
                 font-weight: 600;
             }
+            
+            .info-title {
+                color: rgb(34, 211, 238);
+                font-weight: 600;
+                font-size: 16px;
+                margin-bottom: 12px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 6px;
+            }
+            
             .help-text {
                 font-size: 12px;
-                color: #6e7681;
+                color: rgb(100, 116, 139);
                 margin-top: 6px;
                 margin-bottom: 12px;
             }
+            
             .safe-indicator {
-                color: #3fb950;
-                font-weight: 500;
+                color: rgb(52, 211, 153);
+                font-weight: 600;
             }
+            
             .unsafe-indicator {
-                color: #f85149;
-                font-weight: 500;
+                color: rgb(248, 113, 113);
+                font-weight: 600;
+            }
+            
+            .status-connected {
+                color: rgb(52, 211, 153);
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+            
+            .status-disconnected {
+                color: rgb(248, 113, 113);
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+            
+            /* Terminal/Console Styling */
+            .terminal-line {
+                color: rgb(100, 116, 139);
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .terminal-line .prompt {
+                color: rgb(34, 211, 238);
             }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>☁️ SimpleCloudDetect Setup</h1>
+                <a href="https://github.com/chvvkumar/simpleCloudDetect" target="_blank" class="github-btn">
+                    <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    GitHub
+                </a>
+                <h1>☁️ Simple<span class="highlight">Cloud</span>Detect <span class="highlight">Setup</span></h1>
             </div>
             
             <div class="content">
@@ -797,9 +956,25 @@ def setup_device(device_number: int):
                 {% endif %}
                 
                 <div class="info">
-                    <p><strong>Current Configuration:</strong></p>
-                    <p>Device Name: {{ current_name }}</p>
-                    <p>Location: {{ current_location }}</p>
+                    <div class="info-title">⚡ Detection Status</div>
+                    <p>Condition: <strong>{{ current_condition }}</strong></p>
+                    <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
+                    <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
+                    <p>Last Updated: <strong>{{ last_update }}</strong></p>
+                </div>
+                
+                <div class="info">
+                    <div class="info-title">🔌 ASCOM Connection</div>
+                    <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
+                    {% if connection_duration %}
+                    <p>Duration: <strong>{{ connection_duration }}</strong></p>
+                    {% endif %}
+                </div>
+                
+                <div class="info">
+                    <div class="info-title">⚙️ Current Configuration</div>
+                    <p>Device Name: <strong>{{ current_name }}</strong></p>
+                    <p>Location: <strong>{{ current_location }}</strong></p>
                     <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
                     <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
                 </div>
@@ -807,18 +982,18 @@ def setup_device(device_number: int):
                 <form method="POST">
                     <div class="form-group">
                         <label for="device_name">Device Name</label>
-                        <input type="text" id="device_name" name="device_name" 
+                        <input type="text" id="device_name" name="device_name" class="glow-input"
                                value="{{ current_name }}" placeholder="Enter device name">
                     </div>
                     
                     <div class="form-group">
                         <label for="location">Location</label>
-                        <input type="text" id="location" name="location" 
+                        <input type="text" id="location" name="location" class="glow-input"
                                value="{{ current_location }}" placeholder="Enter location">
                     </div>
                     
                     <div class="form-group">
-                        <h2>Safety Configuration</h2>
+                        <h2>🛡️ Safety Configuration</h2>
                         <label>Mark conditions that are UNSAFE for observing</label>
                         <div class="help-text">Unchecked conditions will be considered SAFE</div>
                         <div class="checkbox-group">
@@ -846,6 +1021,42 @@ def setup_device(device_number: int):
     unsafe_conditions = safety_monitor.alpaca_config.unsafe_conditions
     safe_conditions = [c for c in all_available_conditions if c not in unsafe_conditions]
     
+    # Get current detection data
+    with safety_monitor.detection_lock:
+        current_condition = safety_monitor.latest_detection.get('class_name', 'Unknown')
+        current_confidence = round(safety_monitor.latest_detection.get('confidence_score', 0.0), 1)
+        detection_time = round(safety_monitor.latest_detection.get('Detection Time (Seconds)', 0.0), 2)
+        timestamp = safety_monitor.latest_detection.get('timestamp')
+        
+    # Format timestamp
+    if timestamp:
+        last_update = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        last_update = 'Never'
+    
+    # Check ASCOM connection status
+    if safety_monitor.connected:
+        ascom_status = 'Connected'
+        ascom_status_class = 'status-connected'
+        
+        # Calculate connection duration
+        if safety_monitor.connected_at:
+            duration = datetime.now() - safety_monitor.connected_at
+            hours, remainder = divmod(int(duration.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            if hours > 0:
+                connection_duration = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                connection_duration = f"{minutes}m {seconds}s"
+            else:
+                connection_duration = f"{seconds}s"
+        else:
+            connection_duration = None
+    else:
+        ascom_status = 'Disconnected'
+        ascom_status_class = 'status-disconnected'
+        connection_duration = None
+    
     return render_template_string(
         html_template,
         message=message,
@@ -853,7 +1064,14 @@ def setup_device(device_number: int):
         current_location=safety_monitor.alpaca_config.location,
         all_conditions=all_available_conditions,
         unsafe_conditions=unsafe_conditions,
-        safe_conditions=safe_conditions
+        safe_conditions=safe_conditions,
+        current_condition=current_condition,
+        current_confidence=current_confidence,
+        detection_time=detection_time,
+        last_update=last_update,
+        ascom_status=ascom_status,
+        ascom_status_class=ascom_status_class,
+        connection_duration=connection_duration
     )
 
 
