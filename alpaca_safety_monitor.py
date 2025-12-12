@@ -783,6 +783,15 @@ def setup_device(device_number: int):
                 color: #f85149;
                 font-weight: 500;
             }
+            .info a {
+                color: #58a6ff;
+                text-decoration: none;
+                transition: color 0.2s ease;
+            }
+            .info a:hover {
+                color: #79c0ff;
+                text-decoration: underline;
+            }
         </style>
     </head>
     <body>
@@ -797,11 +806,23 @@ def setup_device(device_number: int):
                 {% endif %}
                 
                 <div class="info">
+                    <p><strong>Current Status:</strong></p>
+                    <p>Condition: <strong>{{ current_condition }}</strong></p>
+                    <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
+                    <p>Detection Time: <strong>{{ detection_time }} seconds</strong></p>
+                </div>
+                
+                <div class="info">
                     <p><strong>Current Configuration:</strong></p>
                     <p>Device Name: {{ current_name }}</p>
                     <p>Location: {{ current_location }}</p>
                     <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
                     <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
+                </div>
+                
+                <div class="info">
+                    <p><strong>About:</strong></p>
+                    <p>GitHub: <a href="https://github.com/chvvkumar/simpleCloudDetect" target="_blank">chvvkumar/simpleCloudDetect</a></p>
                 </div>
                 
                 <form method="POST">
@@ -846,6 +867,12 @@ def setup_device(device_number: int):
     unsafe_conditions = safety_monitor.alpaca_config.unsafe_conditions
     safe_conditions = [c for c in all_available_conditions if c not in unsafe_conditions]
     
+    # Get current detection data
+    with safety_monitor.detection_lock:
+        current_condition = safety_monitor.latest_detection.get('class_name', 'Unknown')
+        current_confidence = round(safety_monitor.latest_detection.get('confidence_score', 0.0), 1)
+        detection_time = round(safety_monitor.latest_detection.get('Detection Time (Seconds)', 0.0), 2)
+    
     return render_template_string(
         html_template,
         message=message,
@@ -853,7 +880,10 @@ def setup_device(device_number: int):
         current_location=safety_monitor.alpaca_config.location,
         all_conditions=all_available_conditions,
         unsafe_conditions=unsafe_conditions,
-        safe_conditions=safe_conditions
+        safe_conditions=safe_conditions,
+        current_condition=current_condition,
+        current_confidence=current_confidence,
+        detection_time=detection_time
     )
 
 
