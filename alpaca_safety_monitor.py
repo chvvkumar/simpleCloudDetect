@@ -19,8 +19,9 @@ import json
 
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_cors import CORS
+import paho.mqtt.client as mqtt
 
-from detect import CloudDetector, Config as DetectConfig
+from detect import CloudDetector, Config as DetectConfig, HADiscoveryManager
 
 # Configure logging
 logging.basicConfig(
@@ -105,10 +106,19 @@ class AlpacaSafetyMonitor:
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
         
-        # Pre-load cloud detector at startup to avoid delays during connection
+        # Setup MQTT client first
+        self.mqtt_client = self._setup_mqtt()
+        self.ha_discovery = None
+        
+        # Pre-load cloud detector at startup (pass MQTT client to avoid double connection)
         logger.info("Pre-loading ML model...")
-        self.cloud_detector = CloudDetector(self.detect_config)
+        self.cloud_detector = CloudDetector(self.detect_config, mqtt_client=self.mqtt_client)
         logger.info("ML model loaded successfully")
+        
+        # Setup HA Discovery if enabled
+        if self.mqtt_client and self.detect_config.mqtt_discovery_mode == 'homeassistant':
+            self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client)
+            self.ha_discovery.publish_discovery_configs()
         
         # Perform initial detection in background to avoid blocking app startup
         threading.Thread(target=self._initial_detection, daemon=True).start()
@@ -137,6 +147,31 @@ class AlpacaSafetyMonitor:
             cloud_condition != 'Unknown' and 
             cloud_condition not in self._unsafe_conditions_set
         )
+    
+    def _setup_mqtt(self):
+        """Setup and return MQTT client based on detect_config"""
+        # Only setup if broker is configured
+        if not self.detect_config.broker:
+            logger.warning("MQTT broker not configured, MQTT publishing disabled")
+            return None
+            
+        client = mqtt.Client()
+        if self.detect_config.mqtt_username and self.detect_config.mqtt_password:
+            client.username_pw_set(self.detect_config.mqtt_username, self.detect_config.mqtt_password)
+        
+        # Setup Last Will Testament for HA discovery mode
+        if self.detect_config.mqtt_discovery_mode == 'homeassistant':
+            availability_topic = f"{self.detect_config.mqtt_discovery_prefix}/sensor/clouddetect_{self.detect_config.device_id}/availability"
+            client.will_set(availability_topic, "offline", retain=True)
+            
+        try:
+            client.connect(self.detect_config.broker, self.detect_config.port)
+            client.loop_start()
+            logger.info(f"Connected to MQTT broker at {self.detect_config.broker}:{self.detect_config.port}")
+            return client
+        except Exception as e:
+            logger.error(f"Failed to connect to MQTT broker: {e}")
+            return None
     
     def get_next_transaction_id(self) -> int:
         """Generate next server transaction ID (thread-safe)"""
@@ -194,17 +229,31 @@ class AlpacaSafetyMonitor:
         return client_id, client_transaction_id
     
     def _detection_loop(self):
-        """Background thread for continuous cloud detection"""
-        logger.info("Starting cloud detection loop")
+        """Background thread for continuous cloud detection AND MQTT publishing"""
+        logger.info("Starting unified detection loop (ASCOM + MQTT)")
         
         while not self.stop_detection.is_set():
             try:
                 # Perform detection in background without blocking API responses
                 result = self.cloud_detector.detect()
                 result['timestamp'] = datetime.now()
+                
+                # Update ASCOM state
                 with self.detection_lock:
                     self.latest_detection = result
                     self._update_cached_safety(result)
+                
+                # Publish to MQTT (unified publishing)
+                if self.mqtt_client:
+                    try:
+                        if self.detect_config.mqtt_discovery_mode == 'homeassistant':
+                            self.ha_discovery.publish_states(result)
+                        else:
+                            # Legacy single-topic publishing
+                            self.mqtt_client.publish(self.detect_config.topic, json.dumps(result))
+                    except Exception as e:
+                        logger.error(f"MQTT publish failed: {e}")
+                
                 logger.info(f"Cloud detection: {result['class_name']} "
                            f"({result['confidence_score']:.1f}%)")
             except Exception as e:

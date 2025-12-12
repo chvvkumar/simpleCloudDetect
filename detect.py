@@ -178,11 +178,12 @@ class HADiscoveryManager:
 
 class CloudDetector:
     """Main class for cloud detection operations"""
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, mqtt_client=None):
         self.config = config
         self.model = self._load_model()
         self.class_names = self._load_class_names()
-        self.mqtt_client = self._setup_mqtt()
+        self.session = requests.Session()  # Reuse HTTP connections
+        self.mqtt_client = mqtt_client if mqtt_client is not None else self._setup_mqtt()
         self.ha_discovery = None
         
         # Initialize HA discovery if enabled
@@ -241,8 +242,8 @@ class CloudDetector:
                         raise FileNotFoundError(f"Image file not found: {file_path}")
                     return Image.open(file_path).convert("RGB")
                 else:
-                    # Handle HTTP URLs
-                    response = requests.get(image_url, timeout=10, stream=True)
+                    # Handle HTTP URLs using session for connection pooling
+                    response = self.session.get(image_url, timeout=2, stream=True)
                     response.raise_for_status()
                     return Image.open(response.raw).convert("RGB")
             except (requests.RequestException, IOError) as e:
@@ -250,7 +251,6 @@ class CloudDetector:
                     logger.error(f"Failed to load image from {image_url} after {max_retries} attempts: {e}")
                     raise
                 logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
-                time.sleep(1)  # Wait before retrying
 
     def _preprocess_image(self, image: Image.Image) -> np.ndarray:
         """Preprocess image for model input"""
@@ -312,7 +312,6 @@ class CloudDetector:
             try:
                 result = self.detect()
                 self.publish_result(result)
-                gc.collect()
                 time.sleep(self.config.detect_interval)
             except Exception as e:
                 logger.error(f"Error in detection loop: {e}")
