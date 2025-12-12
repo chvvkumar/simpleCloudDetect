@@ -573,6 +573,13 @@ def setup_device(device_number: int):
                 unsafe_conditions.append(condition)
         
         safety_monitor.alpaca_config.unsafe_conditions = unsafe_conditions
+        # Update the in-memory set to match the new configuration
+        safety_monitor._unsafe_conditions_set = set(unsafe_conditions)
+        
+        # Recalculate cached safety status with new unsafe conditions
+        with safety_monitor.detection_lock:
+            safety_monitor._update_cached_safety(safety_monitor.latest_detection)
+        
         logger.info(f"Unsafe conditions updated to: {unsafe_conditions}")
         
         # Save configuration to file
@@ -591,7 +598,7 @@ def setup_device(device_number: int):
     <head>
         <title>SimpleCloudDetect Setup</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
         <style>
             * {
                 margin: 0;
@@ -599,42 +606,43 @@ def setup_device(device_number: int):
                 box-sizing: border-box;
             }
             body {
-                font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: #0d1117;
                 min-height: 100vh;
                 padding: 20px;
-                color: #e4e4e4;
+                color: #c9d1d9;
             }
             .container {
                 max-width: 700px;
                 margin: 50px auto;
-                background: #1e1e1e;
+                background: #161b22;
                 border-radius: 12px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+                border: 1px solid #30363d;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
                 overflow: hidden;
             }
             .header {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #1f6feb 0%, #0969da 100%);
                 padding: 32px 30px;
                 text-align: center;
             }
             h1 {
                 color: #ffffff;
                 font-size: 28px;
-                font-weight: 500;
-                letter-spacing: 0.5px;
+                font-weight: 600;
+                letter-spacing: -0.5px;
                 margin: 0;
             }
             .content {
                 padding: 30px;
             }
             h2 {
-                color: #bb86fc;
+                color: #58a6ff;
                 margin-top: 30px;
                 margin-bottom: 15px;
                 font-size: 18px;
-                font-weight: 500;
-                letter-spacing: 0.25px;
+                font-weight: 600;
+                letter-spacing: -0.25px;
             }
             .form-group {
                 margin-bottom: 24px;
@@ -642,97 +650,96 @@ def setup_device(device_number: int):
             label {
                 display: block;
                 margin-bottom: 8px;
-                color: #b3b3b3;
+                color: #8b949e;
                 font-weight: 500;
                 font-size: 14px;
-                letter-spacing: 0.15px;
             }
             input[type="text"] {
                 width: 100%;
-                padding: 14px 16px;
-                background: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-                color: #e4e4e4;
-                font-size: 15px;
-                font-family: 'Roboto', sans-serif;
-                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                padding: 12px 14px;
+                background: #0d1117;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                color: #c9d1d9;
+                font-size: 14px;
+                font-family: 'Inter', sans-serif;
+                transition: all 0.2s ease;
             }
             input[type="text"]:focus {
                 outline: none;
-                border-color: #bb86fc;
-                background: #333333;
-                box-shadow: 0 0 0 3px rgba(187, 134, 252, 0.1);
+                border-color: #58a6ff;
+                background: #010409;
+                box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
             }
             input[type="text"]::placeholder {
-                color: #666666;
+                color: #484f58;
             }
             .checkbox-group {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 12px;
-                padding: 20px;
-                background: #2d2d2d;
-                border-radius: 8px;
-                border: 1px solid #3d3d3d;
+                gap: 10px;
+                padding: 16px;
+                background: #0d1117;
+                border-radius: 6px;
+                border: 1px solid #30363d;
             }
             .checkbox-item {
                 display: flex;
                 align-items: center;
                 padding: 10px 12px;
-                background: #333333;
+                background: #161b22;
                 border-radius: 6px;
-                transition: all 0.2s ease;
+                border: 1px solid #30363d;
+                transition: all 0.15s ease;
             }
             .checkbox-item:hover {
-                background: #3a3a3a;
-                transform: translateX(2px);
+                background: #1c2128;
+                border-color: #58a6ff;
             }
             .checkbox-item input[type="checkbox"] {
-                margin-right: 12px;
-                width: 20px;
-                height: 20px;
+                margin-right: 10px;
+                width: 18px;
+                height: 18px;
                 cursor: pointer;
-                accent-color: #bb86fc;
+                accent-color: #1f6feb;
             }
             .checkbox-item label {
                 margin: 0;
                 font-weight: 400;
                 cursor: pointer;
-                color: #e4e4e4;
-                font-size: 15px;
+                color: #c9d1d9;
+                font-size: 14px;
             }
             button {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(180deg, #1f883d 0%, #18692f 100%);
                 color: white;
-                padding: 14px 32px;
+                padding: 12px 24px;
                 border: none;
-                border-radius: 8px;
+                border-radius: 6px;
                 cursor: pointer;
-                font-size: 16px;
-                font-weight: 500;
+                font-size: 14px;
+                font-weight: 600;
                 width: 100%;
                 margin-top: 24px;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+                transition: all 0.2s ease;
+                box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04);
             }
             button:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+                background: linear-gradient(180deg, #26a148 0%, #1e7e34 100%);
+                box-shadow: 0 4px 12px rgba(31, 136, 61, 0.3);
             }
             button:active {
-                transform: translateY(0);
+                transform: scale(0.98);
             }
             .message {
-                background: linear-gradient(135deg, #03dac6 0%, #018786 100%);
-                color: #000000;
-                padding: 16px 20px;
-                border-radius: 8px;
-                margin-bottom: 24px;
+                background: linear-gradient(135deg, #238636 0%, #1f7a32 100%);
+                color: #ffffff;
+                padding: 14px 16px;
+                border-radius: 6px;
+                margin-bottom: 20px;
                 font-weight: 500;
-                box-shadow: 0 4px 12px rgba(3, 218, 198, 0.2);
+                font-size: 14px;
+                border: 1px solid #2ea043;
                 animation: slideIn 0.3s ease;
             }
             @keyframes slideIn {
@@ -746,35 +753,34 @@ def setup_device(device_number: int):
                 }
             }
             .info {
-                background: #2d2d2d;
-                padding: 20px;
-                border-radius: 8px;
+                background: #0d1117;
+                padding: 16px;
+                border-radius: 6px;
                 margin-bottom: 24px;
-                border-left: 4px solid #bb86fc;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+                border: 1px solid #30363d;
             }
             .info p {
-                margin: 8px 0;
-                color: #b3b3b3;
+                margin: 6px 0;
+                color: #8b949e;
                 line-height: 1.6;
+                font-size: 14px;
             }
             .info strong {
-                color: #e4e4e4;
-                font-weight: 500;
+                color: #c9d1d9;
+                font-weight: 600;
             }
             .help-text {
-                font-size: 13px;
-                color: #888888;
-                margin-top: 8px;
-                font-style: italic;
-                letter-spacing: 0.1px;
+                font-size: 12px;
+                color: #6e7681;
+                margin-top: 6px;
+                margin-bottom: 12px;
             }
             .safe-indicator {
-                color: #03dac6;
+                color: #3fb950;
                 font-weight: 500;
             }
             .unsafe-indicator {
-                color: #cf6679;
+                color: #f85149;
                 font-weight: 500;
             }
         </style>
