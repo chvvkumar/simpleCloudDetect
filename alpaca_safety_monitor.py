@@ -57,6 +57,14 @@ class AlpacaConfig:
     location: str = "AllSky Camera"
     unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
     
+    # Confidence threshold settings
+    default_threshold: float = 50.0  # Default threshold for any class not explicitly configured
+    class_thresholds: Dict[str, float] = field(default_factory=dict)  # Map class names to thresholds
+    
+    # Debounce settings (in seconds)
+    debounce_to_safe_sec: int = 60  # Wait time before switching from Unsafe → Safe
+    debounce_to_unsafe_sec: int = 0  # Wait time before switching from Safe → Unsafe (immediate)
+    
     def save_to_file(self, filepath: str = "alpaca_config.json"):
         """Save configuration to JSON file"""
         try:
@@ -69,11 +77,22 @@ class AlpacaConfig:
     
     @classmethod
     def load_from_file(cls, filepath: str = "alpaca_config.json"):
-        """Load configuration from JSON file"""
+        """Load configuration from JSON file with backward compatibility"""
         try:
             if os.path.exists(filepath):
                 with open(filepath, 'r') as f:
                     config_dict = json.load(f)
+                
+                # Ensure new fields exist with defaults for backward compatibility
+                if 'default_threshold' not in config_dict:
+                    config_dict['default_threshold'] = 50.0
+                if 'class_thresholds' not in config_dict:
+                    config_dict['class_thresholds'] = {}
+                if 'debounce_to_safe_sec' not in config_dict:
+                    config_dict['debounce_to_safe_sec'] = 60
+                if 'debounce_to_unsafe_sec' not in config_dict:
+                    config_dict['debounce_to_unsafe_sec'] = 0
+                
                 logger.info(f"Configuration loaded from {filepath}")
                 return cls(**config_dict)
         except Exception as e:
@@ -104,6 +123,12 @@ class AlpacaSafetyMonitor:
         }
         self._cached_is_safe = False  # Cache safe status to reduce lock contention
         self._unsafe_conditions_set = set(alpaca_config.unsafe_conditions)  # Set lookup is O(1)
+        
+        # Debounce state tracking
+        self._stable_safe_state = False  # The actual safe/unsafe value returned to the client
+        self._pending_safe_state: Optional[bool] = None  # The potential new state we are waiting to verify
+        self._state_change_start_time: Optional[datetime] = None  # Timestamp when pending state first appeared
+        
         self.detection_lock = threading.Lock()
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
@@ -137,14 +162,65 @@ class AlpacaSafetyMonitor:
         logger.info(f"Initialized {self.alpaca_config.device_name}")
     
     def _update_cached_safety(self, detection: Dict[str, Any]):
-        """Update cached safety status (assumes lock is held)"""
-        cloud_condition = detection.get('class_name', '')
+        """Update cached safety status with debouncing logic (assumes lock is held)"""
+        # Step A: Determine Instantaneous Safety
+        class_name = detection.get('class_name', '')
         confidence = detection.get('confidence_score', 0.0)
-        self._cached_is_safe = (
-            confidence >= 50.0 and 
-            cloud_condition != 'Unknown' and 
-            cloud_condition not in self._unsafe_conditions_set
+        
+        # Get the specific threshold for this class, or use default
+        threshold = self.alpaca_config.class_thresholds.get(
+            class_name, 
+            self.alpaca_config.default_threshold
         )
+        
+        # Check if current conditions indicate safe state
+        is_safe_now = (
+            confidence >= threshold and 
+            class_name != 'Unknown' and 
+            class_name not in self._unsafe_conditions_set
+        )
+        
+        # Step B: Apply Debouncing
+        if is_safe_now == self._stable_safe_state:
+            # State matches - reset any pending changes
+            self._pending_safe_state = None
+            self._state_change_start_time = None
+            self._cached_is_safe = self._stable_safe_state  # Keep cache in sync
+        else:
+            # State differs from stable state
+            if self._pending_safe_state != is_safe_now:
+                # New change detected - start debounce timer
+                self._pending_safe_state = is_safe_now
+                self._state_change_start_time = datetime.now()
+                logger.info(f"State change detected: {'Safe' if is_safe_now else 'Unsafe'} "
+                           f"(pending debounce verification)")
+            else:
+                # Change persisting - check if debounce period has elapsed
+                if self._state_change_start_time:
+                    elapsed_time = (datetime.now() - self._state_change_start_time).total_seconds()
+                    
+                    # Determine required duration based on transition direction
+                    if is_safe_now:
+                        # Transitioning to Safe - use safe debounce time
+                        required_duration = self.alpaca_config.debounce_to_safe_sec
+                    else:
+                        # Transitioning to Unsafe - use unsafe debounce time (usually 0 for immediate)
+                        required_duration = self.alpaca_config.debounce_to_unsafe_sec
+                    
+                    if elapsed_time >= required_duration:
+                        # Debounce period complete - commit state change
+                        self._stable_safe_state = is_safe_now
+                        self._cached_is_safe = is_safe_now
+                        self._pending_safe_state = None
+                        self._state_change_start_time = None
+                        logger.warning(f"SAFETY STATE CHANGED: {'SAFE' if is_safe_now else 'UNSAFE'} "
+                                     f"(class={class_name}, confidence={confidence:.1f}%, "
+                                     f"threshold={threshold:.1f}%, debounce={elapsed_time:.1f}s)")
+                    else:
+                        # Still waiting - log progress
+                        remaining = required_duration - elapsed_time
+                        logger.debug(f"Debouncing: {remaining:.1f}s remaining for state change to "
+                                   f"{'Safe' if is_safe_now else 'Unsafe'}")
     
     def _setup_mqtt(self):
         """Setup and return MQTT client based on detect_config"""
@@ -300,14 +376,14 @@ class AlpacaSafetyMonitor:
     def is_safe(self) -> bool:
         """Determine if conditions are safe based on latest detection"""
         with self.detection_lock:
-            return self._cached_is_safe
+            return self._stable_safe_state
     
     def get_device_state(self) -> list:
         """Get current operational state"""
         # Per ASCOM spec: DeviceState should only include operational properties
         # For SafetyMonitor, only IsSafe is operational
         with self.detection_lock:
-            return [{"Name": "IsSafe", "Value": self._cached_is_safe if self.connected else False}]
+            return [{"Name": "IsSafe", "Value": self._stable_safe_state if self.connected else False}]
         
     def _get_arg(self, key: str, default: Any = None) -> str:
         """Case-insensitive argument retrieval from request values"""
@@ -595,11 +671,38 @@ def get_available_cloud_conditions() -> list:
         return ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
 
 
+def sync_class_thresholds_with_labels():
+    """Synchronize class_thresholds with available labels, adding defaults for new labels"""
+    if safety_monitor:
+        all_conditions = get_available_cloud_conditions()
+        current_thresholds = safety_monitor.alpaca_config.class_thresholds
+        
+        # Check if any new labels were added that don't have thresholds
+        for condition in all_conditions:
+            if condition not in current_thresholds:
+                # Initialize new conditions with default threshold
+                current_thresholds[condition] = safety_monitor.alpaca_config.default_threshold
+                logger.info(f"Initialized threshold for new condition '{condition}': {safety_monitor.alpaca_config.default_threshold}%")
+        
+        # Optionally remove thresholds for conditions no longer in labels
+        removed_conditions = [cond for cond in current_thresholds if cond not in all_conditions]
+        for condition in removed_conditions:
+            del current_thresholds[condition]
+            logger.info(f"Removed threshold for obsolete condition '{condition}'")
+        
+        if removed_conditions:
+            # Save if we made changes
+            safety_monitor.alpaca_config.save_to_file()
+
+
 @app.route('/setup/v1/safetymonitor/<int:device_number>/setup', methods=['GET', 'POST'])
 def setup_device(device_number: int):
     """Setup page for configuring device name and location"""
     if device_number != safety_monitor.alpaca_config.device_number:
         return jsonify({"error": "Invalid device number"}), 404
+    
+    # Synchronize thresholds with available labels (handles new labels in labels.txt)
+    sync_class_thresholds_with_labels()
     
     # Get available conditions from labels.txt - used by both GET and POST
     all_available_conditions = get_available_cloud_conditions()
@@ -617,6 +720,23 @@ def setup_device(device_number: int):
             safety_monitor.alpaca_config.location = location
             logger.info(f"Location updated to: {location}")
         
+        # Handle debounce timers
+        try:
+            debounce_safe = request.form.get('debounce_safe', '').strip()
+            if debounce_safe:
+                safety_monitor.alpaca_config.debounce_to_safe_sec = int(debounce_safe)
+                logger.info(f"Debounce to safe updated to: {debounce_safe}s")
+        except ValueError:
+            logger.warning(f"Invalid debounce_safe value: {debounce_safe}")
+        
+        try:
+            debounce_unsafe = request.form.get('debounce_unsafe', '').strip()
+            if debounce_unsafe:
+                safety_monitor.alpaca_config.debounce_to_unsafe_sec = int(debounce_unsafe)
+                logger.info(f"Debounce to unsafe updated to: {debounce_unsafe}s")
+        except ValueError:
+            logger.warning(f"Invalid debounce_unsafe value: {debounce_unsafe}")
+        
         # Handle unsafe conditions checkboxes
         unsafe_conditions = []
         for condition in all_available_conditions:
@@ -627,8 +747,28 @@ def setup_device(device_number: int):
         # Update the in-memory set to match the new configuration
         safety_monitor._unsafe_conditions_set = set(unsafe_conditions)
         
-        # Recalculate cached safety status with new unsafe conditions
+        # Handle class-specific thresholds
+        class_thresholds = {}
+        for condition in all_available_conditions:
+            threshold_value = request.form.get(f'threshold_{condition}', '').strip()
+            if threshold_value:
+                try:
+                    threshold = float(threshold_value)
+                    if 0 <= threshold <= 100:
+                        class_thresholds[condition] = threshold
+                    else:
+                        logger.warning(f"Threshold for {condition} out of range: {threshold}")
+                except ValueError:
+                    logger.warning(f"Invalid threshold for {condition}: {threshold_value}")
+        
+        safety_monitor.alpaca_config.class_thresholds = class_thresholds
+        logger.info(f"Class thresholds updated: {class_thresholds}")
+        
+        # Recalculate cached safety status with new configuration
         with safety_monitor.detection_lock:
+            # Reset debounce state when configuration changes
+            safety_monitor._pending_safe_state = None
+            safety_monitor._state_change_start_time = None
             safety_monitor._update_cached_safety(safety_monitor.latest_detection)
         
         logger.info(f"Unsafe conditions updated to: {unsafe_conditions}")
@@ -757,45 +897,180 @@ def setup_device(device_number: int):
                 color: rgb(34, 211, 238);
             }
             
-            .two-column-layout {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 24px;
-                align-items: start;
-            }
-            
-            @media (max-width: 1024px) {
-                .two-column-layout {
-                    grid-template-columns: 1fr;
-                }
-            }
-            
-            .left-column,
-            .right-column {
+            .main-content {
                 background: rgba(15, 23, 42, 0.6);
                 backdrop-filter: blur(12px);
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 12px;
-                padding: 30px;
+                padding: 32px;
                 box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
+                margin-bottom: 24px;
             }
             
-            .column-header {
+            .section {
+                margin-bottom: 32px;
+            }
+            
+            .section:last-child {
+                margin-bottom: 0;
+            }
+            
+            .section-header {
                 color: #ffffff;
-                font-size: 24px;
+                font-size: 20px;
                 font-weight: 700;
                 letter-spacing: -0.5px;
-                margin: 0 0 24px 0;
+                margin: 0 0 16px 0;
                 text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
                 border-bottom: 2px solid rgba(6, 182, 212, 0.3);
-                padding-bottom: 12px;
+                padding-bottom: 10px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
             }
             
-            .column-header .highlight {
+            .section-header .icon {
+                font-size: 24px;
+            }
+            
+            .section-header .highlight {
                 color: rgb(34, 211, 238);
             }
             
-            h2 {
+            .status-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+            
+            .status-card {
+                background: rgba(10, 15, 24, 0.9);
+                padding: 16px;
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .status-card-title {
+                color: rgb(34, 211, 238);
+                font-weight: 600;
+                font-size: 14px;
+                margin-bottom: 10px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .status-card p {
+                margin: 6px 0;
+                color: rgb(148, 163, 184);
+                line-height: 1.6;
+                font-size: 13px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .status-card strong {
+                color: rgb(226, 232, 240);
+                font-weight: 600;
+            }
+            
+            .param-guide {
+                background: linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, rgba(6, 182, 212, 0.02) 100%);
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(6, 182, 212, 0.2);
+            }
+            
+            .param-guide-title {
+                color: rgb(34, 211, 238);
+                font-weight: 700;
+                font-size: 16px;
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .param-item {
+                margin: 12px 0;
+                padding: 12px;
+                background: rgba(15, 23, 42, 0.4);
+                border-left: 3px solid;
+                border-radius: 4px;
+            }
+            
+            .param-item.safe {
+                border-color: rgb(52, 211, 153);
+            }
+            
+            .param-item.unsafe {
+                border-color: rgb(248, 113, 113);
+            }
+            
+            .param-item.threshold {
+                border-color: rgb(251, 191, 36);
+            }
+            
+            .param-item strong {
+                display: block;
+                font-size: 13px;
+                margin-bottom: 4px;
+                font-weight: 600;
+            }
+            
+            .param-item.safe strong {
+                color: rgb(52, 211, 153);
+            }
+            
+            .param-item.unsafe strong {
+                color: rgb(248, 113, 113);
+            }
+            
+            .param-item.threshold strong {
+                color: rgb(251, 191, 36);
+            }
+            
+            .param-item span {
+                color: rgb(148, 163, 184);
+                font-size: 12px;
+                line-height: 1.5;
+                font-family: 'Inter', sans-serif;
+            }
+            
+            .input-group {
+                margin-bottom: 20px;
+            }
+            
+            .input-group:last-child {
+                margin-bottom: 0;
+            }
+            
+            .input-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-bottom: 16px;
+            }
+            
+            @media (max-width: 768px) {
+                .input-row {
+                    grid-template-columns: 1fr;
+                }
+            }
+            
+            @media (max-width: 1200px) {
+                .section > div[style*="grid-template-columns"] {
+                    grid-template-columns: 1fr !important;
+                }
+                
+                .param-guide {
+                    position: static !important;
+                    margin-bottom: 24px;
+                }
+            }
                 color: rgb(34, 211, 238);
                 margin-top: 30px;
                 margin-bottom: 15px;
@@ -1023,74 +1298,182 @@ def setup_device(device_number: int):
                 <h1>☁️ Simple<span class="highlight">Cloud</span>Detect</h1>
             </div>
             
-            <div class="two-column-layout">
-                <!-- Left Column: Information Display -->
-                <div class="left-column">
-                    {% if message %}
-                    <div class="message">✓ {{ message }}</div>
-                    {% endif %}
-                    
-                    <div class="info">
-                        <div class="info-title">⚡ Detection Status</div>
-                        <p>Condition: <strong>{{ current_condition }}</strong></p>
-                        <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
-                        <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
-                        <p>Last Updated: <strong>{{ last_update }}</strong></p>
+            <div class="main-content">
+                {% if message %}
+                <div class="message">✓ {{ message }}</div>
+                {% endif %}
+                
+                <!-- Status Overview Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="icon">📊</span>
+                        <span>System <span class="highlight">Status</span></span>
                     </div>
                     
-                    <div class="info">
-                        <div class="info-title">🔌 ASCOM Connection</div>
-                        <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
-                        {% if connection_duration %}
-                        <p>Duration: <strong>{{ connection_duration }}</strong></p>
-                        {% endif %}
-                    </div>
-                    
-                    <div class="info">
-                        <div class="info-title">⚙️ Current Configuration</div>
-                        <p>Device Name: <strong>{{ current_name }}</strong></p>
-                        <p>Location: <strong>{{ current_location }}</strong></p>
-                        <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
-                        <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <div class="status-card-title">⚡ Current Detection</div>
+                            <p>Condition: <strong>{{ current_condition }}</strong></p>
+                            <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
+                            <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
+                            <p>Last Updated: <strong>{{ last_update }}</strong></p>
+                        </div>
+                        
+                        <div class="status-card">
+                            <div class="status-card-title">🔌 ASCOM Connection</div>
+                            <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
+                            {% if connection_duration %}
+                            <p>Duration: <strong>{{ connection_duration }}</strong></p>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="status-card">
+                            <div class="status-card-title">⚙️ Device Info</div>
+                            <p>Name: <strong>{{ current_name }}</strong></p>
+                            <p>Location: <strong>{{ current_location }}</strong></p>
+                        </div>
                     </div>
                 </div>
                 
-                <!-- Right Column: User Input -->
-                <div class="right-column">
-                    <h2 class="column-header"><span class="highlight">Setup</span></h2>
+                <!-- Configuration Form Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="icon">🛠️</span>
+                        <span>Configuration <span class="highlight">Settings</span></span>
+                    </div>
                     
-                    <form method="POST">
-                        <div class="form-group">
-                            <label for="device_name">Device Name</label>
-                            <input type="text" id="device_name" name="device_name" class="glow-input"
-                                   value="{{ current_name }}" placeholder="Enter device name">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="location">Location</label>
-                            <input type="text" id="location" name="location" class="glow-input"
-                                   value="{{ current_location }}" placeholder="Enter location">
-                        </div>
-                        
-                        <div class="form-group">
-                            <h2>🛡️ Safety Configuration</h2>
-                            <label>Mark conditions that are UNSAFE for observing</label>
-                            <div class="help-text">Unchecked conditions will be considered SAFE</div>
-                            <div class="checkbox-group">
-                                {% for condition in all_conditions %}
-                                <div class="checkbox-item">
-                                    <input type="checkbox" 
-                                           id="unsafe_{{ condition }}" 
-                                           name="unsafe_{{ condition }}"
-                                           {% if condition in unsafe_conditions %}checked{% endif %}>
-                                    <label for="unsafe_{{ condition }}">{{ condition }}</label>
+                    <div style="display: grid; grid-template-columns: 1fr 380px; gap: 24px; align-items: start;">
+                        <div>
+                            <form method="POST">
+                                <!-- Basic Settings -->
+                                <div class="input-group">
+                                    <h2>Basic Settings</h2>
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="device_name">Device Name</label>
+                                            <input type="text" id="device_name" name="device_name" class="glow-input"
+                                                   value="{{ current_name }}" placeholder="Enter device name">
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="location">Location</label>
+                                            <input type="text" id="location" name="location" class="glow-input"
+                                                   value="{{ current_location }}" placeholder="Enter location">
+                                        </div>
+                                    </div>
                                 </div>
-                                {% endfor %}
+                                
+                                <!-- Debounce Timers -->
+                                <div class="input-group">
+                                    <h2>⏱️ Debounce Timers (seconds)</h2>
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="debounce_safe" style="color: rgb(52, 211, 153);">Safe Wait Time</label>
+                                            <input type="number" id="debounce_safe" name="debounce_safe" class="glow-input"
+                                                   value="{{ debounce_to_safe }}" min="0" max="3600" step="1" placeholder="60">
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="debounce_unsafe" style="color: rgb(248, 113, 113);">Unsafe Wait Time</label>
+                                            <input type="number" id="debounce_unsafe" name="debounce_unsafe" class="glow-input"
+                                                   value="{{ debounce_to_unsafe }}" min="0" max="3600" step="1" placeholder="0">
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Safety Configuration -->
+                                <div class="input-group">
+                                    <h2>🛡️ Safety Configuration</h2>
+                                    <div class="checkbox-group">
+                                        {% for condition in all_conditions %}
+                                        <div class="checkbox-item" style="flex-direction: column; align-items: flex-start; padding: 14px;">
+                                            <div style="display: flex; align-items: center; width: 100%; margin-bottom: 8px;">
+                                                <input type="checkbox" 
+                                                       id="unsafe_{{ condition }}" 
+                                                       name="unsafe_{{ condition }}"
+                                                       {% if condition in unsafe_conditions %}checked{% endif %}
+                                                       style="margin-right: 10px;">
+                                                <label for="unsafe_{{ condition }}" style="margin: 0; flex: 1;">{{ condition }}</label>
+                                            </div>
+                                            <div style="width: 100%; display: flex; align-items: center; gap: 8px;">
+                                                <label for="threshold_{{ condition }}" 
+                                                       style="margin: 0; font-size: 11px; color: rgb(100, 116, 139); min-width: 65px;">
+                                                    Threshold:
+                                                </label>
+                                                <input type="number" 
+                                                       id="threshold_{{ condition }}" 
+                                                       name="threshold_{{ condition }}"
+                                                       value="{{ class_thresholds.get(condition, default_threshold) }}"
+                                                       min="0" max="100" step="1"
+                                                       placeholder="{{ default_threshold }}"
+                                                       style="flex: 1; padding: 6px 10px; background: rgba(10, 15, 24, 0.9); 
+                                                              border: 1px solid rgb(71, 85, 105); border-radius: 4px; 
+                                                              color: rgb(241, 245, 249); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                <span style="font-size: 11px; color: rgb(100, 116, 139); min-width: 20px;">%</span>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                
+                                <button type="submit">💾 Save Configuration</button>
+                            </form>
+                        </div>
+                        
+                        <!-- Parameter Guide Sidebar -->
+                        <div class="param-guide" style="position: sticky; top: 20px;">
+                            <div class="param-guide-title">📖 Parameter Guide</div>
+                            
+                            <div class="param-item safe">
+                                <strong>Safe Wait Time (Debounce to Safe)</strong>
+                                <span>How long the sky must remain clear before the system reports "Safe".</span>
+                            </div>
+                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(52, 211, 153, 0.05); border-radius: 4px;">
+                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Why it matters:</strong><br>
+                                    Prevents opening the observatory roof during brief breaks in storms or passing clouds. 
+                                    Set higher (e.g., 300s = 5 min) for unstable weather patterns.<br><br>
+                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Recommended:</strong><br>
+                                    • Stable climate: 60-120s<br>
+                                    • Variable weather: 180-300s<br>
+                                    • Storm-prone areas: 300-600s
+                                </div>
+                            </div>
+                            
+                            <div class="param-item unsafe">
+                                <strong>Unsafe Wait Time (Debounce to Unsafe)</strong>
+                                <span>How long bad weather must persist before the system reports "Unsafe".</span>
+                            </div>
+                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(248, 113, 113, 0.05); border-radius: 4px;">
+                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Why it matters:</strong><br>
+                                    Controls emergency response speed. Setting to 0 triggers immediate roof closure at first sign of danger. 
+                                    Higher values (10-30s) can filter out brief sensor glitches.<br><br>
+                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Recommended:</strong><br>
+                                    • Automated roof: 0s (immediate)<br>
+                                    • Manual operation: 5-10s<br>
+                                    • Glitch filtering: 10-30s
+                                </div>
+                            </div>
+                            
+                            <div class="param-item threshold">
+                                <strong>Confidence Threshold</strong>
+                                <span>Minimum AI confidence (%) required to trigger each weather condition.</span>
+                            </div>
+                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(251, 191, 36, 0.05); border-radius: 4px;">
+                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">How it works:</strong><br>
+                                    If set to 80% for "Rain", the AI must be 80% confident it's raining to trigger. 
+                                    Lower = more sensitive (fewer misses, more false alarms). Higher = less sensitive (more misses, fewer false alarms).<br><br>
+                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">Tuning tips:</strong><br>
+                                    • Start at 50% (default)<br>
+                                    • Lower for critical conditions (Rain: 40-50%)<br>
+                                    • Higher for uncertain conditions (Overcast: 60-70%)<br>
+                                    • Adjust based on false alarm rate
+                                </div>
                             </div>
                         </div>
-                        
-                        <button type="submit">Save Configuration</button>
-                    </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1152,7 +1535,11 @@ def setup_device(device_number: int):
         last_update=last_update,
         ascom_status=ascom_status,
         ascom_status_class=ascom_status_class,
-        connection_duration=connection_duration
+        connection_duration=connection_duration,
+        debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
+        debounce_to_unsafe=safety_monitor.alpaca_config.debounce_to_unsafe_sec,
+        default_threshold=safety_monitor.alpaca_config.default_threshold,
+        class_thresholds=safety_monitor.alpaca_config.class_thresholds
     )
 
 
