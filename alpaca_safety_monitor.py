@@ -56,6 +56,7 @@ class AlpacaConfig:
     detection_interval: int = 30  # seconds between ML detections (from detect.py)
     update_interval: int = 30  # seconds between cloud detection updates
     location: str = "AllSky Camera"
+    image_url: str = field(default_factory=lambda: os.environ.get('IMAGE_URL', ''))
     unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
     
     # Confidence threshold settings
@@ -95,6 +96,8 @@ class AlpacaConfig:
                     config_dict['debounce_to_unsafe_sec'] = 0
                 if 'detection_interval' not in config_dict:
                     config_dict['detection_interval'] = 30
+                if 'image_url' not in config_dict:
+                    config_dict['image_url'] = os.environ.get('IMAGE_URL', '')
                 
                 logger.info(f"Configuration loaded from {filepath}")
                 return cls(**config_dict)
@@ -714,6 +717,7 @@ def setup_device(device_number: int):
         # Handle form submission
         device_name = request.form.get('device_name', '').strip()
         location = request.form.get('location', '').strip()
+        image_url = request.form.get('image_url', '').strip()
         
         if device_name:
             safety_monitor.alpaca_config.device_name = device_name
@@ -722,6 +726,18 @@ def setup_device(device_number: int):
         if location:
             safety_monitor.alpaca_config.location = location
             logger.info(f"Location updated to: {location}")
+        
+        if image_url:
+            safety_monitor.alpaca_config.image_url = image_url
+            # Update the detect_config as well
+            safety_monitor.detect_config.image_url = image_url
+            logger.info(f"Image URL updated to: {image_url}")
+        elif image_url == '' and 'image_url' in request.form:
+            # User explicitly cleared the field - use environment default
+            default_url = os.environ.get('IMAGE_URL', '')
+            safety_monitor.alpaca_config.image_url = default_url
+            safety_monitor.detect_config.image_url = default_url
+            logger.info(f"Image URL reset to environment default: {default_url}")
         
         # Handle timing configuration with safety validations
         try:
@@ -977,8 +993,8 @@ def setup_device(device_number: int):
             }
             
             .status-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                display: flex;
+                flex-direction: column;
                 gap: 16px;
                 margin-bottom: 24px;
             }
@@ -988,6 +1004,11 @@ def setup_device(device_number: int):
                 padding: 16px;
                 border-radius: 8px;
                 border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .status-card-large {
+                background: transparent;
+                padding: 24px;
             }
             
             .status-card-title {
@@ -1000,6 +1021,106 @@ def setup_device(device_number: int):
                 display: flex;
                 align-items: center;
                 gap: 8px;
+            }
+            
+            .detection-title {
+                font-size: 18px;
+                color: rgb(34, 211, 238);
+                font-weight: 700;
+            }
+            
+            .detection-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 16px;
+                margin-top: 16px;
+            }
+            
+            .detection-item {
+                background: rgba(15, 23, 42, 0.6);
+                padding: 14px;
+                border-radius: 6px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .detection-label {
+                color: rgb(148, 163, 184);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 6px;
+            }
+            
+            .detection-value {
+                color: rgb(226, 232, 240);
+                font-size: 20px;
+                font-weight: 700;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .detection-sub {
+                color: rgb(100, 116, 139);
+                font-size: 11px;
+                margin-top: 4px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .collapsible-btn {
+                width: 100%;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                color: rgb(226, 232, 240);
+                padding: 14px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+                text-align: left;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                transition: all 0.2s ease;
+                margin: 0;
+                text-transform: none;
+                letter-spacing: 0;
+            }
+            
+            .collapsible-btn:hover {
+                background: rgba(15, 23, 42, 0.8);
+                border-color: rgba(71, 85, 105, 0.8);
+                transform: none;
+            }
+            
+            .collapsible-btn .icon {
+                font-size: 16px;
+            }
+            
+            .collapsible-btn .arrow {
+                transition: transform 0.2s ease;
+                font-size: 12px;
+            }
+            
+            .collapsible-btn.active .arrow {
+                transform: rotate(180deg);
+            }
+            
+            .collapsible-content {
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+                background: rgba(10, 15, 24, 0.6);
+                border-radius: 0 0 6px 6px;
+                margin-top: -1px;
+            }
+            
+            .collapsible-content.open {
+                max-height: 3000px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                border-top: none;
+            }
+            
+            .collapsible-inner {
+                padding: 16px;
             }
             
             .status-card p {
@@ -1423,29 +1544,86 @@ def setup_device(device_number: int):
                     </div>
                     
                     <div class="status-grid">
-                        <div class="status-card">
-                            <div class="status-card-title">⚡ Current Detection</div>
-                            <p>Condition: <strong>{{ current_condition }}</strong></p>
-                            <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
-                            <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
-                            <p>Last Updated: <strong>{{ last_update }}</strong></p>
+                        <!-- Current Detection - Prominent -->
+                        <div class="status-card status-card-large">
+                            <div class="status-card-title detection-title">⚡ Current Detection</div>
+                            <div class="detection-grid">
+                                <div class="detection-item">
+                                    <div class="detection-label">Condition</div>
+                                    <div class="detection-value">{{ current_condition }}</div>
+                                </div>
+                                <div class="detection-item">
+                                    <div class="detection-label">Confidence</div>
+                                    <div class="detection-value">{{ current_confidence }}%</div>
+                                </div>
+                                <div class="detection-item">
+                                    <div class="detection-label">Detection Time</div>
+                                    <div class="detection-value">{{ detection_time }}s</div>
+                                </div>
+                                <div class="detection-item">
+                                    <div class="detection-label">Last Updated</div>
+                                    <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
+                                </div>
+                            </div>
                         </div>
                         
-                        <div class="status-card">
-                            <div class="status-card-title">🔌 ASCOM Connection</div>
-                            <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
-                            {% if connection_duration %}
-                            <p>Duration: <strong>{{ connection_duration }}</strong></p>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="status-card">
-                            <div class="status-card-title">⚙️ Device Info</div>
-                            <p>Name: <strong>{{ current_name }}</strong></p>
-                            <p>Location: <strong>{{ current_location }}</strong></p>
+                        <!-- ASCOM Connection & Device Info - Horizontal Layout -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                            <!-- ASCOM Connection - Collapsible -->
+                            <div>
+                                <button class="collapsible-btn" onclick="toggleCollapsible('ascom-details')">
+                                    <span><span class="icon">🔌</span> ASCOM Connection: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="ascom-details" class="collapsible-content">
+                                    <div class="collapsible-inner">
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span>
+                                        </p>
+                                        {% if connection_duration %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
+                                        </p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Device Info - Collapsible -->
+                            <div>
+                                <button class="collapsible-btn" onclick="toggleCollapsible('device-details')">
+                                    <span><span class="icon">⚙️</span> Device Information</span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="device-details" class="collapsible-content">
+                                    <div class="collapsible-inner">
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Name: <strong style="color: rgb(226, 232, 240);">{{ current_name }}</strong>
+                                        </p>
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Location: <strong style="color: rgb(226, 232, 240);">{{ current_location }}</strong>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
+                
+                <script>
+                function toggleCollapsible(id) {
+                    const content = document.getElementById(id);
+                    const btn = content.previousElementSibling;
+                    
+                    if (content.classList.contains('open')) {
+                        content.classList.remove('open');
+                        btn.classList.remove('active');
+                    } else {
+                        content.classList.add('open');
+                        btn.classList.add('active');
+                    }
+                }
+                </script>
                 
                 <!-- Configuration Form Section -->
                 <div class="section">
@@ -1454,30 +1632,140 @@ def setup_device(device_number: int):
                         <span>Configuration <span class="highlight">Settings</span></span>
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: 1fr 380px; gap: 24px; align-items: start;">
-                        <div>
-                            <form method="POST">
-                                <!-- Basic Settings -->
-                                <div class="input-group">
-                                    <h2>Basic Settings</h2>
-                                    <div class="input-row">
-                                        <div class="form-group">
-                                            <label for="device_name">Device Name</label>
-                                            <input type="text" id="device_name" name="device_name" class="glow-input"
-                                                   value="{{ current_name }}" placeholder="Enter device name">
+                    <form method="POST">
+                                <!-- Parameter Guide (moved from sidebar) -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('param-guide')">
+                                        <span><span class="icon">📖</span> Parameter Guide</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="param-guide" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="param-item" style="border-color: rgb(59, 130, 246);">
+                                                <strong style="color: rgb(59, 130, 246);">Image Fetch Interval</strong>
+                                                <span>How often to download new images from AllSky camera and run AI analysis. Lower values = faster response but higher CPU usage.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(59, 130, 246, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(59, 130, 246); font-size: 12px;">Recommended:</strong><br>
+                                                    • Fast response: 15-30s<br>
+                                                    • Balanced: 30-60s<br>
+                                                    • Resource efficient: 60-120s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item" style="border-color: rgb(236, 72, 153);">
+                                                <strong style="color: rgb(236, 72, 153);">ASCOM Update Interval</strong>
+                                                <span>How often to re-check safety status. Should be ≥ Image Fetch Interval.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(236, 72, 153, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(236, 72, 153); font-size: 12px;">Rule:</strong> Set equal to Image Fetch Interval for efficiency.
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item safe">
+                                                <strong>Safe Wait Time</strong>
+                                                <span>How long the sky must remain clear before the system reports "Safe".</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(52, 211, 153, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Why it matters:</strong><br>
+                                                    Prevents opening the observatory roof during brief breaks in storms or passing clouds. 
+                                                    Set higher (e.g., 300s = 5 min) for unstable weather patterns.<br><br>
+                                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Recommended:</strong><br>
+                                                    • Stable climate: 60-120s<br>
+                                                    • Variable weather: 180-300s<br>
+                                                    • Storm-prone areas: 300-600s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item unsafe">
+                                                <strong>Unsafe Wait Time (Debounce to Unsafe)</strong>
+                                                <span>How long bad weather must persist before the system reports "Unsafe".</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(248, 113, 113, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Why it matters:</strong><br>
+                                                    Controls emergency response speed. Setting to 0 triggers immediate roof closure at first sign of danger. 
+                                                    Higher values (10-30s) can filter out brief sensor glitches.<br><br>
+                                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Recommended:</strong><br>
+                                                    • Automated roof: 0s (immediate)<br>
+                                                    • Manual operation: 5-10s<br>
+                                                    • Glitch filtering: 10-30s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item threshold">
+                                                <strong>Confidence Threshold</strong>
+                                                <span>Minimum AI confidence (%) required to trigger each weather condition.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(251, 191, 36, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">📊 Key Concept:</strong><br>
+                                                    <strong>Higher threshold = Less sensitive</strong> (AI must be more confident)<br>
+                                                    <strong>Lower threshold = More sensitive</strong> (AI triggers with less certainty)<br><br>
+                                                    
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">How it works:</strong><br>
+                                                    If set to 80% for "Rain", the AI must be 80% confident it's raining to trigger. 
+                                                    Lower = more sensitive (fewer misses, more false alarms). Higher = less sensitive (more misses, fewer false alarms).<br><br>
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">Tuning tips:</strong><br>
+                                                    • Start at 50% (default)<br>
+                                                    • Lower for critical conditions (Rain: 40-50%)<br>
+                                                    • Higher for uncertain conditions (Overcast: 60-70%)<br>
+                                                    • Adjust based on false alarm rate
+                                                </div>
+                                            </div>
                                         </div>
-                                        
-                                        <div class="form-group">
-                                            <label for="location">Location</label>
-                                            <input type="text" id="location" name="location" class="glow-input"
-                                                   value="{{ current_location }}" placeholder="Enter location">
+                                    </div>
+                                </div>
+                                
+                                <!-- Basic Settings -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('basic-settings')">
+                                        <span><span class="icon">⚙️</span> Basic Settings</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="basic-settings" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="device_name">Device Name</label>
+                                                        <input type="text" id="device_name" name="device_name" class="glow-input"
+                                                               value="{{ current_name }}" placeholder="Enter device name">
+                                                    </div>
+                                                    
+                                                    <div class="form-group">
+                                                        <label for="location">Location</label>
+                                                        <input type="text" id="location" name="location" class="glow-input"
+                                                               value="{{ current_location }}" placeholder="Enter location">
+                                                    </div>
+                                                </div>
+                                                <div class="input-row">
+                                                    <div class="form-group" style="grid-column: span 2;">
+                                                        <label for="image_url">Image Source URL</label>
+                                                        <input type="text" id="image_url" name="image_url" class="glow-input"
+                                                               value="{{ current_image_url }}" placeholder="{{ image_url_default }}">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            URL to fetch images for cloud detection. Leave empty to use environment variable default.
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                                 
                                 <!-- Timing Configuration -->
-                                <div class="input-group">
-                                    <h2>Timing Configuration</h2>
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('timing-config')">
+                                        <span><span class="icon">⏱️</span> Timing Configuration</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="timing-config" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
                                     
                                     <!-- How It Works Visualization -->
                                     <div style="margin-bottom: 24px; padding: 20px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgb(51, 65, 85); border-radius: 8px;">
@@ -1685,11 +1973,20 @@ def setup_device(device_number: int):
                                         validateTiming();
                                     });
                                     </script>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 
                                 <!-- Safety Configuration -->
-                                <div class="input-group">
-                                    <h2>Safety Classification</h2>
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('safety-config')">
+                                        <span><span class="icon">🛡️</span> Safety Classification</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="safety-config" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
                                     <p class="help-text" style="margin-bottom: 16px;">
                                         Mark each weather condition as <strong style="color: rgb(52, 211, 153);">Safe</strong> or <strong style="color: rgb(248, 113, 113);">Unsafe</strong> for observatory operations.
                                     </p>
@@ -1717,12 +2014,25 @@ def setup_device(device_number: int):
                                                         </label>
                                                     </div>
                                                 </div>
-                                                <div style="display: flex; align-items: center; gap: 8px;">
-                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 110px;">Confidence:</label>
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 80px;">Threshold:</label>
                                                     <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
                                                            value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
-                                                           style="width: 70px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
-                                                    <span style="font-size: 11px; color: rgb(148, 163, 184);">%</span>
+                                                           class="threshold-input" data-condition="{{ condition }}"
+                                                           style="width: 60px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184); min-width: 16px;">%</span>
+                                                    
+                                                    <!-- Threshold Bar Visualization -->
+                                                    <div style="flex: 1; position: relative; height: 20px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                        <div id="bar_below_{{ condition }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ class_thresholds.get(condition, default_threshold) }}%; background: rgba(100, 116, 139, 0.4); transition: width 0.2s ease;"></div>
+                                                        <div id="bar_above_{{ condition }}" style="position: absolute; top: 0; bottom: 0; right: 0; width: {{ 100 - class_thresholds.get(condition, default_threshold) }}%; background: rgba(52, 211, 153, 0.6); transition: width 0.2s ease, background 0.2s ease;"></div>
+                                                        <div id="bar_marker_{{ condition }}" style="position: absolute; top: 0; bottom: 0; left: {{ class_thresholds.get(condition, default_threshold) }}%; width: 2px; background: rgb(251, 191, 36); z-index: 10; transition: left 0.2s ease;">
+                                                            <div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: rgb(251, 191, 36); font-size: 9px; font-weight: 600; white-space: nowrap; background: rgba(15, 23, 42, 0.9); padding: 1px 4px; border-radius: 2px;">{{ class_thresholds.get(condition, default_threshold) }}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div style="min-width: 70px; font-size: 10px; color: rgb(148, 163, 184); text-align: right;">
+                                                        <span id="bar_label_{{ condition }}">✓ Triggers >{{ class_thresholds.get(condition, default_threshold) }}%</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                             {% endfor %}
@@ -1752,12 +2062,25 @@ def setup_device(device_number: int):
                                                         </label>
                                                     </div>
                                                 </div>
-                                                <div style="display: flex; align-items: center; gap: 8px;">
-                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 110px;">Confidence:</label>
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 80px;">Threshold:</label>
                                                     <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
                                                            value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
-                                                           style="width: 70px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
-                                                    <span style="font-size: 11px; color: rgb(148, 163, 184);">%</span>
+                                                           class="threshold-input" data-condition="{{ condition }}"
+                                                           style="width: 60px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184); min-width: 16px;">%</span>
+                                                    
+                                                    <!-- Threshold Bar Visualization -->
+                                                    <div style="flex: 1; position: relative; height: 20px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                        <div id="bar_below_{{ condition }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ class_thresholds.get(condition, default_threshold) }}%; background: rgba(100, 116, 139, 0.4); transition: width 0.2s ease;"></div>
+                                                        <div id="bar_above_{{ condition }}" style="position: absolute; top: 0; bottom: 0; right: 0; width: {{ 100 - class_thresholds.get(condition, default_threshold) }}%; background: rgba(248, 113, 113, 0.6); transition: width 0.2s ease, background 0.2s ease;"></div>
+                                                        <div id="bar_marker_{{ condition }}" style="position: absolute; top: 0; bottom: 0; left: {{ class_thresholds.get(condition, default_threshold) }}%; width: 2px; background: rgb(251, 191, 36); z-index: 10; transition: left 0.2s ease;">
+                                                            <div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: rgb(251, 191, 36); font-size: 9px; font-weight: 600; white-space: nowrap; background: rgba(15, 23, 42, 0.9); padding: 1px 4px; border-radius: 2px;">{{ class_thresholds.get(condition, default_threshold) }}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div style="min-width: 70px; font-size: 10px; color: rgb(148, 163, 184); text-align: right;">
+                                                        <span id="bar_label_{{ condition }}">✓ Triggers >{{ class_thresholds.get(condition, default_threshold) }}%</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                             {% endfor %}
@@ -1770,6 +2093,14 @@ def setup_device(device_number: int):
                                         const radios = document.querySelectorAll('.safety-radio');
                                         const safeContainer = document.getElementById('safe-conditions');
                                         const unsafeContainer = document.getElementById('unsafe-conditions');
+                                        
+                                        // Update threshold bars dynamically
+                                        const thresholdInputs = document.querySelectorAll('.threshold-input');
+                                        thresholdInputs.forEach(input => {
+                                            input.addEventListener('input', function() {
+                                                updateThresholdBar(this.dataset.condition, parseInt(this.value) || 0);
+                                            });
+                                        });
                                         
                                         radios.forEach(radio => {
                                             radio.addEventListener('change', function() {
@@ -1788,6 +2119,12 @@ def setup_device(device_number: int):
                                                         unsafeContainer.appendChild(card);
                                                     }
                                                     
+                                                    // Update threshold bar color to match new safety classification
+                                                    const thresholdInput = card.querySelector('.threshold-input');
+                                                    if (thresholdInput) {
+                                                        updateThresholdBar(condition, parseInt(thresholdInput.value) || 0);
+                                                    }
+                                                    
                                                     // Add subtle animation
                                                     card.style.animation = 'none';
                                                     setTimeout(() => {
@@ -1797,6 +2134,40 @@ def setup_device(device_number: int):
                                             });
                                         });
                                     });
+                                    
+                                    // Update threshold bar visualization
+                                    function updateThresholdBar(condition, value) {
+                                        const barBelow = document.getElementById(`bar_below_${condition}`);
+                                        const barAbove = document.getElementById(`bar_above_${condition}`);
+                                        const barMarker = document.getElementById(`bar_marker_${condition}`);
+                                        const barLabel = document.getElementById(`bar_label_${condition}`);
+                                        
+                                        if (!barBelow || !barAbove || !barMarker || !barLabel) return;
+                                        
+                                        // Clamp value between 0 and 100
+                                        value = Math.max(0, Math.min(100, value));
+                                        
+                                        // Update widths
+                                        barBelow.style.width = value + '%';
+                                        barAbove.style.width = (100 - value) + '%';
+                                        barMarker.style.left = value + '%';
+                                        
+                                        // Update marker label
+                                        const markerLabel = barMarker.querySelector('div');
+                                        if (markerLabel) {
+                                            markerLabel.textContent = value + '%';
+                                        }
+                                        
+                                        // Update trigger label
+                                        barLabel.textContent = `✓ Triggers >${value}%`;
+                                        
+                                        // Update bar color based on current safety classification
+                                        const card = document.querySelector(`.condition-card[data-condition="${condition}"]`);
+                                        if (card) {
+                                            const isSafe = card.dataset.safety === 'safe';
+                                            barAbove.style.background = isSafe ? 'rgba(52, 211, 153, 0.6)' : 'rgba(248, 113, 113, 0.6)';
+                                        }
+                                    }
                                     </script>
                                     <style>
                                     @keyframes slideIn {
@@ -1810,89 +2181,13 @@ def setup_device(device_number: int):
                                         }
                                     }
                                     </style>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 
                                 <button type="submit">💾 Save Configuration</button>
                             </form>
-                        </div>
-                        
-                        <!-- Parameter Guide Sidebar -->
-                        <div class="param-guide" style="position: sticky; top: 20px;">
-                            <div class="param-guide-title">Parameter Guide</div>
-                            
-                            <div class="param-item" style="border-color: rgb(59, 130, 246);">
-                                <strong style="color: rgb(59, 130, 246);">Image Fetch Interval</strong>
-                                <span>How often to download new images from AllSky camera and run AI analysis. Lower values = faster response but higher CPU usage.</span>
-                            </div>
-                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(59, 130, 246, 0.05); border-radius: 4px;">
-                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
-                                    <strong style="color: rgb(59, 130, 246); font-size: 12px;">Recommended:</strong><br>
-                                    • Fast response: 15-30s<br>
-                                    • Balanced: 30-60s<br>
-                                    • Resource efficient: 60-120s
-                                </div>
-                            </div>
-                            
-                            <div class="param-item" style="border-color: rgb(236, 72, 153);">
-                                <strong style="color: rgb(236, 72, 153);">ASCOM Update Interval</strong>
-                                <span>How often to re-check safety status. Should be ≥ Image Fetch Interval.</span>
-                            </div>
-                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(236, 72, 153, 0.05); border-radius: 4px;">
-                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
-                                    <strong style="color: rgb(236, 72, 153); font-size: 12px;">Rule:</strong> Set equal to Image Fetch Interval for efficiency.
-                                </div>
-                            </div>
-                            
-                            <div class="param-item safe">
-                                <strong>Safe Wait Time</strong>
-                                <span>How long the sky must remain clear before the system reports "Safe".</span>
-                            </div>
-                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(52, 211, 153, 0.05); border-radius: 4px;">
-                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
-                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Why it matters:</strong><br>
-                                    Prevents opening the observatory roof during brief breaks in storms or passing clouds. 
-                                    Set higher (e.g., 300s = 5 min) for unstable weather patterns.<br><br>
-                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Recommended:</strong><br>
-                                    • Stable climate: 60-120s<br>
-                                    • Variable weather: 180-300s<br>
-                                    • Storm-prone areas: 300-600s
-                                </div>
-                            </div>
-                            
-                            <div class="param-item unsafe">
-                                <strong>Unsafe Wait Time (Debounce to Unsafe)</strong>
-                                <span>How long bad weather must persist before the system reports "Unsafe".</span>
-                            </div>
-                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(248, 113, 113, 0.05); border-radius: 4px;">
-                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
-                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Why it matters:</strong><br>
-                                    Controls emergency response speed. Setting to 0 triggers immediate roof closure at first sign of danger. 
-                                    Higher values (10-30s) can filter out brief sensor glitches.<br><br>
-                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Recommended:</strong><br>
-                                    • Automated roof: 0s (immediate)<br>
-                                    • Manual operation: 5-10s<br>
-                                    • Glitch filtering: 10-30s
-                                </div>
-                            </div>
-                            
-                            <div class="param-item threshold">
-                                <strong>Confidence Threshold</strong>
-                                <span>Minimum AI confidence (%) required to trigger each weather condition.</span>
-                            </div>
-                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(251, 191, 36, 0.05); border-radius: 4px;">
-                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
-                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">How it works:</strong><br>
-                                    If set to 80% for "Rain", the AI must be 80% confident it's raining to trigger. 
-                                    Lower = more sensitive (fewer misses, more false alarms). Higher = less sensitive (more misses, fewer false alarms).<br><br>
-                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">Tuning tips:</strong><br>
-                                    • Start at 50% (default)<br>
-                                    • Lower for critical conditions (Rain: 40-50%)<br>
-                                    • Higher for uncertain conditions (Overcast: 60-70%)<br>
-                                    • Adjust based on false alarm rate
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -1945,6 +2240,8 @@ def setup_device(device_number: int):
         message=message,
         current_name=safety_monitor.alpaca_config.device_name,
         current_location=safety_monitor.alpaca_config.location,
+        current_image_url=safety_monitor.alpaca_config.image_url,
+        image_url_default=os.environ.get('IMAGE_URL', 'Not set in environment'),
         all_conditions=all_available_conditions,
         unsafe_conditions=unsafe_conditions,
         safe_conditions=safe_conditions,
