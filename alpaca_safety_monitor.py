@@ -119,6 +119,8 @@ class AlpacaSafetyMonitor:
         self.connected = False
         self.connecting = False
         self.connected_at: Optional[datetime] = None
+        self.disconnected_at: Optional[datetime] = None
+        self.last_connected_at: Optional[datetime] = None  # Track last successful connection
         
         # Cloud detection state - use single lock for all state
         self.latest_detection: Optional[Dict[str, Any]] = {
@@ -345,37 +347,31 @@ class AlpacaSafetyMonitor:
         logger.info("Detection loop stopped")
     
     def connect(self):
-        """Connect to the device"""
+        """Connect to the device (ASCOM client connection)"""
         if self.connected:
             return
         
         try:
-            # Start detection loop (model is already pre-loaded)
-            self.stop_detection.clear()
-            self.detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
-            self.detection_thread.start()
-            
+            # Just mark as connected - detection loop is already running
             self.connected = True
             self.connected_at = datetime.now()
-            logger.info("Connected to safety monitor")
+            self.last_connected_at = self.connected_at
+            logger.info("ASCOM client connected to safety monitor")
         except Exception as e:
             logger.error(f"Failed to connect: {e}")
             raise
     
     def disconnect(self):
-        """Disconnect from the device"""
+        """Disconnect from the device (ASCOM client disconnection)"""
         if not self.connected:
             return
         
         try:
-            # Signal detection loop to stop (non-blocking)
-            self.stop_detection.set()
-            # Don't wait for thread to join - let it stop asynchronously
-            # Thread is daemon so it will terminate when program exits
-            
+            # Just mark as disconnected - detection loop keeps running for MQTT/web UI
             self.connected = False
+            self.disconnected_at = datetime.now()
             self.connected_at = None
-            logger.info("Disconnected from safety monitor")
+            logger.info("ASCOM client disconnected from safety monitor")
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
     
@@ -1585,6 +1581,16 @@ def setup_device(device_number: int):
                                             Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
                                         </p>
                                         {% endif %}
+                                        {% if last_connected %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Last Connected: <strong style="color: rgb(226, 232, 240);">{{ last_connected }}</strong>
+                                        </p>
+                                        {% endif %}
+                                        {% if last_disconnected %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Last Disconnected: <strong style="color: rgb(226, 232, 240);">{{ last_disconnected }}</strong>
+                                        </p>
+                                        {% endif %}
                                     </div>
                                 </div>
                             </div>
@@ -2235,6 +2241,15 @@ def setup_device(device_number: int):
         ascom_status_class = 'status-disconnected'
         connection_duration = None
     
+    # Format last connected/disconnected timestamps
+    last_connected = None
+    if safety_monitor.last_connected_at:
+        last_connected = safety_monitor.last_connected_at.strftime('%Y-%m-%d %H:%M:%S')
+    
+    last_disconnected = None
+    if safety_monitor.disconnected_at:
+        last_disconnected = safety_monitor.disconnected_at.strftime('%Y-%m-%d %H:%M:%S')
+    
     return render_template_string(
         html_template,
         message=message,
@@ -2252,6 +2267,8 @@ def setup_device(device_number: int):
         ascom_status=ascom_status,
         ascom_status_class=ascom_status_class,
         connection_duration=connection_duration,
+        last_connected=last_connected,
+        last_disconnected=last_disconnected,
         detection_interval=safety_monitor.alpaca_config.detection_interval,
         update_interval=safety_monitor.alpaca_config.update_interval,
         debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
@@ -2369,8 +2386,12 @@ def main():
     # 2. Initialize global safety monitor
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
     
-    # 3. Connect (starts the background detection thread)
-    safety_monitor.connect()
+    # 3. Start detection loop (internal, always running for MQTT/web UI)
+    # This starts the detection thread but doesn't set "connected" status
+    safety_monitor.stop_detection.clear()
+    safety_monitor.detection_thread = threading.Thread(target=safety_monitor._detection_loop, daemon=True)
+    safety_monitor.detection_thread.start()
+    logger.info("Starting unified detection loop (ASCOM + MQTT)")
     
     # 4. Start Discovery Service
     discovery_service = AlpacaDiscovery(alpaca_config.port)
