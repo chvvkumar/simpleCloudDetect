@@ -59,12 +59,21 @@ That's it! Your device will automatically appear in Home Assistant under **Setti
 
 ## Screenshots
 
+### Cloud Detection Examples
+
 | Condition | Example |
 |-----------|---------|
 | **Clear Skies** | ![Clear](/images/HA2.png) |
 | **Majority Clouds** | ![Mostly Cloudy](/images/Mostly%20Cloudy.png) |
 | **Wisps of Clouds** | ![Wisps](/images/wisps.png) |
 | **Overcast** | ![Overcast](/images/Overcast.png) |
+
+### ASCOM Alpaca Settings Interface
+
+| View | Screenshot |
+|------|------------|
+| **Settings Collapsed** | ![Settings Collapsed](/images/Settings_Collapsed.png) |
+| **Settings Expanded** | ![Settings Expanded](/images/Settings_Expanded.png) |
 
 ---
 

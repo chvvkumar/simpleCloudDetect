@@ -12,15 +12,19 @@ import socket
 import threading
 import time
 import os
+import signal
+import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any
 import json
 
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_cors import CORS
+import paho.mqtt.client as mqtt
 
-from detect import CloudDetector, Config as DetectConfig
+from detect import CloudDetector, Config as DetectConfig, HADiscoveryManager
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +32,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Global timezone helper
+def get_current_time(timezone_str: str = 'UTC') -> datetime:
+    """Get current time in specified timezone"""
+    try:
+        tz = ZoneInfo(timezone_str)
+        return datetime.now(tz)
+    except Exception:
+        # Fallback to UTC if timezone is invalid
+        return datetime.now(ZoneInfo('UTC'))
 
 # ASCOM Error Codes
 ERROR_SUCCESS = 0
@@ -50,9 +64,23 @@ class AlpacaConfig:
     driver_info: str = "ASCOM Alpaca SafetyMonitor v2.0 - Cloud Detection Driver"
     driver_version: str = "2.0"
     interface_version: int = 3  # Changed from 1 to 3
+    detection_interval: int = 30  # seconds between ML detections (from detect.py)
     update_interval: int = 30  # seconds between cloud detection updates
     location: str = "AllSky Camera"
+    image_url: str = field(default_factory=lambda: os.environ.get('IMAGE_URL', ''))
     unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
+    
+    # Confidence threshold settings
+    default_threshold: float = 50.0  # Default threshold for any class not explicitly configured
+    class_thresholds: Dict[str, float] = field(default_factory=dict)  # Map class names to thresholds
+    
+    # Debounce settings (in seconds)
+    debounce_to_safe_sec: int = 60  # Wait time before switching from Unsafe → Safe
+    debounce_to_unsafe_sec: int = 0  # Wait time before switching from Safe → Unsafe (immediate)
+    
+    # NTP and timezone settings
+    ntp_server: str = field(default_factory=lambda: os.environ.get('NTP_SERVER', 'pool.ntp.org'))
+    timezone: str = field(default_factory=lambda: os.environ.get('TZ', 'UTC'))
     
     def save_to_file(self, filepath: str = "alpaca_config.json"):
         """Save configuration to JSON file"""
@@ -66,11 +94,26 @@ class AlpacaConfig:
     
     @classmethod
     def load_from_file(cls, filepath: str = "alpaca_config.json"):
-        """Load configuration from JSON file"""
+        """Load configuration from JSON file with backward compatibility"""
         try:
             if os.path.exists(filepath):
                 with open(filepath, 'r') as f:
                     config_dict = json.load(f)
+                
+                # Ensure new fields exist with defaults for backward compatibility
+                if 'default_threshold' not in config_dict:
+                    config_dict['default_threshold'] = 50.0
+                if 'class_thresholds' not in config_dict:
+                    config_dict['class_thresholds'] = {}
+                if 'debounce_to_safe_sec' not in config_dict:
+                    config_dict['debounce_to_safe_sec'] = 60
+                if 'debounce_to_unsafe_sec' not in config_dict:
+                    config_dict['debounce_to_unsafe_sec'] = 0
+                if 'detection_interval' not in config_dict:
+                    config_dict['detection_interval'] = 30
+                if 'image_url' not in config_dict:
+                    config_dict['image_url'] = os.environ.get('IMAGE_URL', '')
+                
                 logger.info(f"Configuration loaded from {filepath}")
                 return cls(**config_dict)
         except Exception as e:
@@ -91,6 +134,9 @@ class AlpacaSafetyMonitor:
         self.connected = False
         self.connecting = False
         self.connected_at: Optional[datetime] = None
+        self.disconnected_at: Optional[datetime] = None
+        self.last_connected_at: Optional[datetime] = None  # Track last successful connection
+        self.client_ip: Optional[str] = None  # Track connected client's IP address
         
         # Cloud detection state - use single lock for all state
         self.latest_detection: Optional[Dict[str, Any]] = {
@@ -101,49 +147,157 @@ class AlpacaSafetyMonitor:
         }
         self._cached_is_safe = False  # Cache safe status to reduce lock contention
         self._unsafe_conditions_set = set(alpaca_config.unsafe_conditions)  # Set lookup is O(1)
+        
+        # Debounce state tracking
+        self._stable_safe_state = False  # The actual safe/unsafe value returned to the client
+        self._pending_safe_state: Optional[bool] = None  # The potential new state we are waiting to verify
+        self._state_change_start_time: Optional[datetime] = None  # Timestamp when pending state first appeared
+        
+        # Safety state history (last 100 transitions)
+        self._safety_history: list = []  # List of (timestamp, is_safe, condition, confidence) tuples
+        
         self.detection_lock = threading.Lock()
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
         
-        # Pre-load cloud detector at startup to avoid delays during connection
+        # Setup MQTT client first
+        self.mqtt_client = self._setup_mqtt()
+        self.ha_discovery = None
+        
+        # Pre-load cloud detector at startup (pass MQTT client to avoid double connection)
         logger.info("Pre-loading ML model...")
-        self.cloud_detector = CloudDetector(self.detect_config)
+        self.cloud_detector = CloudDetector(self.detect_config, mqtt_client=self.mqtt_client)
         logger.info("ML model loaded successfully")
         
-        # Perform initial detection in background to avoid blocking app startup
-        threading.Thread(target=self._initial_detection, daemon=True).start()
+        # Setup HA Discovery if enabled
+        if self.mqtt_client and self.detect_config.mqtt_discovery_mode == 'homeassistant':
+            self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client)
+            self.ha_discovery.publish_discovery_configs()
         
-        logger.info(f"Initialized {self.alpaca_config.device_name}")
-    
-    def _initial_detection(self):
-        """Perform initial detection in background"""
+        # FIX: Blocking initial detection to ensure readiness (better than background thread)
+        logger.info("Performing initial detection (blocking)...")
         try:
-            logger.info("Performing initial detection...")
             initial_result = self.cloud_detector.detect()
-            initial_result['timestamp'] = datetime.now()
+            initial_result['timestamp'] = get_current_time(self.alpaca_config.timezone)
             with self.detection_lock:
                 self.latest_detection = initial_result
                 self._update_cached_safety(initial_result)
+                
+                # Add initial state to safety history
+                self._safety_history.append({
+                    'timestamp': get_current_time(self.alpaca_config.timezone),
+                    'is_safe': self._stable_safe_state,
+                    'condition': initial_result.get('class_name', 'Unknown'),
+                    'confidence': initial_result.get('confidence_score', 0.0)
+                })
+                
             logger.info(f"Initial detection complete: {initial_result['class_name']}")
         except Exception as e:
             logger.error(f"Initial detection failed: {e}")
+        
+        logger.info(f"Initialized {self.alpaca_config.device_name}")
     
     def _update_cached_safety(self, detection: Dict[str, Any]):
-        """Update cached safety status (assumes lock is held)"""
-        cloud_condition = detection.get('class_name', '')
+        """Update cached safety status with debouncing logic (assumes lock is held)"""
+        # Step A: Determine Instantaneous Safety
+        class_name = detection.get('class_name', '')
         confidence = detection.get('confidence_score', 0.0)
-        self._cached_is_safe = (
-            confidence >= 50.0 and 
-            cloud_condition != 'Unknown' and 
-            cloud_condition not in self._unsafe_conditions_set
+        
+        # Get the specific threshold for this class, or use default
+        threshold = self.alpaca_config.class_thresholds.get(
+            class_name, 
+            self.alpaca_config.default_threshold
         )
+        
+        # Check if current conditions indicate safe state
+        is_safe_now = (
+            confidence >= threshold and 
+            class_name != 'Unknown' and 
+            class_name not in self._unsafe_conditions_set
+        )
+        
+        # Step B: Apply Debouncing
+        if is_safe_now == self._stable_safe_state:
+            # State matches - reset any pending changes
+            self._pending_safe_state = None
+            self._state_change_start_time = None
+            self._cached_is_safe = self._stable_safe_state  # Keep cache in sync
+        else:
+            # State differs from stable state
+            if self._pending_safe_state != is_safe_now:
+                # New change detected - start debounce timer
+                self._pending_safe_state = is_safe_now
+                self._state_change_start_time = get_current_time(self.alpaca_config.timezone)
+                logger.info(f"State change detected: {'Safe' if is_safe_now else 'Unsafe'} "
+                           f"(pending debounce verification)")
+            else:
+                # Change persisting - check if debounce period has elapsed
+                if self._state_change_start_time:
+                    elapsed_time = (get_current_time(self.alpaca_config.timezone) - self._state_change_start_time).total_seconds()
+                    
+                    # Determine required duration based on transition direction
+                    if is_safe_now:
+                        # Transitioning to Safe - use safe debounce time
+                        required_duration = self.alpaca_config.debounce_to_safe_sec
+                    else:
+                        # Transitioning to Unsafe - use unsafe debounce time (usually 0 for immediate)
+                        required_duration = self.alpaca_config.debounce_to_unsafe_sec
+                    
+                    if elapsed_time >= required_duration:
+                        # Debounce period complete - commit state change
+                        self._stable_safe_state = is_safe_now
+                        self._cached_is_safe = is_safe_now
+                        self._pending_safe_state = None
+                        self._state_change_start_time = None
+                        
+                        # Add to safety history (keep last 100)
+                        self._safety_history.append({
+                            'timestamp': get_current_time(self.alpaca_config.timezone),
+                            'is_safe': is_safe_now,
+                            'condition': class_name,
+                            'confidence': confidence
+                        })
+                        if len(self._safety_history) > 100:
+                            self._safety_history.pop(0)
+                        
+                        logger.warning(f"SAFETY STATE CHANGED: {'SAFE' if is_safe_now else 'UNSAFE'} "
+                                     f"(class={class_name}, confidence={confidence:.1f}%, "
+                                     f"threshold={threshold:.1f}%, debounce={elapsed_time:.1f}s)")
+                    else:
+                        # Still waiting - log progress
+                        remaining = required_duration - elapsed_time
+                        logger.debug(f"Debouncing: {remaining:.1f}s remaining for state change to "
+                                   f"{'Safe' if is_safe_now else 'Unsafe'}")
+    
+    def _setup_mqtt(self):
+        """Setup and return MQTT client based on detect_config"""
+        # Only setup if broker is configured
+        if not self.detect_config.broker:
+            logger.warning("MQTT broker not configured, MQTT publishing disabled")
+            return None
+            
+        client = mqtt.Client()
+        if self.detect_config.mqtt_username and self.detect_config.mqtt_password:
+            client.username_pw_set(self.detect_config.mqtt_username, self.detect_config.mqtt_password)
+        
+        # Setup Last Will Testament for HA discovery mode
+        if self.detect_config.mqtt_discovery_mode == 'homeassistant':
+            availability_topic = f"{self.detect_config.mqtt_discovery_prefix}/sensor/clouddetect_{self.detect_config.device_id}/availability"
+            client.will_set(availability_topic, "offline", retain=True)
+            
+        try:
+            client.connect(self.detect_config.broker, self.detect_config.port)
+            client.loop_start()
+            logger.info(f"Connected to MQTT broker at {self.detect_config.broker}:{self.detect_config.port}")
+            return client
+        except Exception as e:
+            logger.error(f"Failed to connect to MQTT broker: {e}")
+            return None
     
     def get_next_transaction_id(self) -> int:
-        """Generate next server transaction ID (thread-safe)"""
+        """Generate next server transaction ID (thread-safe, wraps at uint32 max)"""
         with self.transaction_lock:
-            self.server_transaction_id += 1
-            if self.server_transaction_id > 4294967295:
-                self.server_transaction_id = 1
+            self.server_transaction_id = (self.server_transaction_id + 1) % 4294967296
             return self.server_transaction_id
     
     def create_response(self, value: Any = None, error_number: int = ERROR_SUCCESS, 
@@ -194,17 +348,31 @@ class AlpacaSafetyMonitor:
         return client_id, client_transaction_id
     
     def _detection_loop(self):
-        """Background thread for continuous cloud detection"""
-        logger.info("Starting cloud detection loop")
+        """Background thread for continuous cloud detection AND MQTT publishing"""
+        logger.info("Starting unified detection loop (ASCOM + MQTT)")
         
         while not self.stop_detection.is_set():
             try:
                 # Perform detection in background without blocking API responses
                 result = self.cloud_detector.detect()
-                result['timestamp'] = datetime.now()
+                result['timestamp'] = get_current_time(self.alpaca_config.timezone)
+                
+                # Update ASCOM state
                 with self.detection_lock:
                     self.latest_detection = result
                     self._update_cached_safety(result)
+                
+                # Publish to MQTT (unified publishing)
+                if self.mqtt_client:
+                    try:
+                        if self.detect_config.mqtt_discovery_mode == 'homeassistant':
+                            self.ha_discovery.publish_states(result)
+                        else:
+                            # Legacy single-topic publishing
+                            self.mqtt_client.publish(self.detect_config.topic, json.dumps(result))
+                    except Exception as e:
+                        logger.error(f"MQTT publish failed: {e}")
+                
                 logger.info(f"Cloud detection: {result['class_name']} "
                            f"({result['confidence_score']:.1f}%)")
             except Exception as e:
@@ -217,52 +385,47 @@ class AlpacaSafetyMonitor:
         
         logger.info("Detection loop stopped")
     
-    def connect(self):
-        """Connect to the device"""
+    def connect(self, client_ip: Optional[str] = None):
+        """Connect to the device (ASCOM client connection)"""
         if self.connected:
             return
         
         try:
-            # Start detection loop (model is already pre-loaded)
-            self.stop_detection.clear()
-            self.detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
-            self.detection_thread.start()
-            
+            # Just mark as connected - detection loop is already running
             self.connected = True
-            self.connected_at = datetime.now()
-            logger.info("Connected to safety monitor")
+            self.connected_at = get_current_time(self.alpaca_config.timezone)
+            self.last_connected_at = self.connected_at
+            self.client_ip = client_ip
+            logger.info(f"ASCOM client connected to safety monitor from {client_ip or 'unknown'}")
         except Exception as e:
             logger.error(f"Failed to connect: {e}")
             raise
     
     def disconnect(self):
-        """Disconnect from the device"""
+        """Disconnect from the device (ASCOM client disconnection)"""
         if not self.connected:
             return
         
         try:
-            # Signal detection loop to stop (non-blocking)
-            self.stop_detection.set()
-            # Don't wait for thread to join - let it stop asynchronously
-            # Thread is daemon so it will terminate when program exits
-            
+            # Just mark as disconnected - detection loop keeps running for MQTT/web UI
             self.connected = False
+            self.disconnected_at = get_current_time(self.alpaca_config.timezone)
             self.connected_at = None
-            logger.info("Disconnected from safety monitor")
+            logger.info("ASCOM client disconnected from safety monitor")
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
     
     def is_safe(self) -> bool:
         """Determine if conditions are safe based on latest detection"""
         with self.detection_lock:
-            return self._cached_is_safe
+            return self._stable_safe_state
     
     def get_device_state(self) -> list:
         """Get current operational state"""
         # Per ASCOM spec: DeviceState should only include operational properties
         # For SafetyMonitor, only IsSafe is operational
         with self.detection_lock:
-            return [{"Name": "IsSafe", "Value": self._cached_is_safe if self.connected else False}]
+            return [{"Name": "IsSafe", "Value": self._stable_safe_state if self.connected else False}]
         
     def _get_arg(self, key: str, default: Any = None) -> str:
         """Case-insensitive argument retrieval from request values"""
@@ -365,7 +528,11 @@ def set_connected(device_number: int):
 
     try:
         if target_state != safety_monitor.connected:
-            safety_monitor.connect() if target_state else safety_monitor.disconnect()
+            if target_state:
+                client_ip = request.remote_addr
+                safety_monitor.connect(client_ip=client_ip)
+            else:
+                safety_monitor.disconnect()
         
         return jsonify(safety_monitor.create_response(
             client_transaction_id=client_tx_id
@@ -403,7 +570,8 @@ def connect_device(device_number: int):
     _, client_tx_id = safety_monitor.get_client_params()
     try:
         if not safety_monitor.connected:
-            safety_monitor.connect()
+            client_ip = request.remote_addr
+            safety_monitor.connect(client_ip=client_ip)
         return jsonify(safety_monitor.create_response(client_transaction_id=client_tx_id))
     except Exception as e:
         logger.error(f"Failed to connect: {e}")
@@ -550,11 +718,38 @@ def get_available_cloud_conditions() -> list:
         return ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
 
 
+def sync_class_thresholds_with_labels():
+    """Synchronize class_thresholds with available labels, adding defaults for new labels"""
+    if safety_monitor:
+        all_conditions = get_available_cloud_conditions()
+        current_thresholds = safety_monitor.alpaca_config.class_thresholds
+        
+        # Check if any new labels were added that don't have thresholds
+        for condition in all_conditions:
+            if condition not in current_thresholds:
+                # Initialize new conditions with default threshold
+                current_thresholds[condition] = safety_monitor.alpaca_config.default_threshold
+                logger.info(f"Initialized threshold for new condition '{condition}': {safety_monitor.alpaca_config.default_threshold}%")
+        
+        # Optionally remove thresholds for conditions no longer in labels
+        removed_conditions = [cond for cond in current_thresholds if cond not in all_conditions]
+        for condition in removed_conditions:
+            del current_thresholds[condition]
+            logger.info(f"Removed threshold for obsolete condition '{condition}'")
+        
+        if removed_conditions:
+            # Save if we made changes
+            safety_monitor.alpaca_config.save_to_file()
+
+
 @app.route('/setup/v1/safetymonitor/<int:device_number>/setup', methods=['GET', 'POST'])
 def setup_device(device_number: int):
     """Setup page for configuring device name and location"""
     if device_number != safety_monitor.alpaca_config.device_number:
         return jsonify({"error": "Invalid device number"}), 404
+    
+    # Synchronize thresholds with available labels (handles new labels in labels.txt)
+    sync_class_thresholds_with_labels()
     
     # Get available conditions from labels.txt - used by both GET and POST
     all_available_conditions = get_available_cloud_conditions()
@@ -563,6 +758,7 @@ def setup_device(device_number: int):
         # Handle form submission
         device_name = request.form.get('device_name', '').strip()
         location = request.form.get('location', '').strip()
+        image_url = request.form.get('image_url', '').strip()
         
         if device_name:
             safety_monitor.alpaca_config.device_name = device_name
@@ -572,24 +768,132 @@ def setup_device(device_number: int):
             safety_monitor.alpaca_config.location = location
             logger.info(f"Location updated to: {location}")
         
-        # Handle unsafe conditions checkboxes
+        if image_url:
+            safety_monitor.alpaca_config.image_url = image_url
+            # Update the detect_config as well
+            safety_monitor.detect_config.image_url = image_url
+            logger.info(f"Image URL updated to: {image_url}")
+        elif image_url == '' and 'image_url' in request.form:
+            # User explicitly cleared the field - use environment default
+            default_url = os.environ.get('IMAGE_URL', '')
+            safety_monitor.alpaca_config.image_url = default_url
+            safety_monitor.detect_config.image_url = default_url
+            logger.info(f"Image URL reset to environment default: {default_url}")
+        
+        # Handle NTP and timezone settings
+        ntp_server = request.form.get('ntp_server', '').strip()
+        if ntp_server:
+            safety_monitor.alpaca_config.ntp_server = ntp_server
+            logger.info(f"NTP server updated to: {ntp_server}")
+        
+        timezone = request.form.get('timezone', '').strip()
+        if timezone:
+            safety_monitor.alpaca_config.timezone = timezone
+            logger.info(f"Timezone updated to: {timezone}")
+        
+        # Handle timing configuration with safety validations
+        try:
+            detection_interval = request.form.get('detection_interval', '').strip()
+            if detection_interval:
+                val = int(detection_interval)
+                if 5 <= val <= 300:
+                    safety_monitor.alpaca_config.detection_interval = val
+                    # Update the detect_config as well
+                    safety_monitor.detect_config.detect_interval = val
+                    logger.info(f"Detection interval updated to: {val}s")
+                else:
+                    logger.warning(f"Detection interval {val}s out of range (5-300s)")
+        except ValueError:
+            logger.warning(f"Invalid detection_interval value: {detection_interval}")
+        
+        try:
+            update_interval = request.form.get('update_interval', '').strip()
+            if update_interval:
+                val = int(update_interval)
+                if 5 <= val <= 300:
+                    safety_monitor.alpaca_config.update_interval = val
+                    logger.info(f"ASCOM update interval updated to: {val}s")
+                else:
+                    logger.warning(f"Update interval {val}s out of range (5-300s)")
+        except ValueError:
+            logger.warning(f"Invalid update_interval value: {update_interval}")
+        
+        # Handle debounce timers with safety validations
+        try:
+            debounce_safe = request.form.get('debounce_safe', '').strip()
+            if debounce_safe:
+                val = int(debounce_safe)
+                # Validation: Safe debounce should be >= detection_interval for smooth operation
+                if val > 0 and val < safety_monitor.alpaca_config.detection_interval:
+                    logger.warning(f"Safe wait time {val}s < detection interval {safety_monitor.alpaca_config.detection_interval}s - may cause erratic behavior")
+                safety_monitor.alpaca_config.debounce_to_safe_sec = val
+                logger.info(f"Debounce to safe updated to: {val}s")
+        except ValueError:
+            logger.warning(f"Invalid debounce_safe value: {debounce_safe}")
+        
+        try:
+            debounce_unsafe = request.form.get('debounce_unsafe', '').strip()
+            if debounce_unsafe:
+                val = int(debounce_unsafe)
+                # Safety validation: Warn if unsafe debounce > 30s (delays emergency response)
+                if val > 30:
+                    logger.warning(f"Unsafe wait time {val}s > 30s - delays emergency response to dangerous conditions")
+                safety_monitor.alpaca_config.debounce_to_unsafe_sec = val
+                logger.info(f"Debounce to unsafe updated to: {val}s")
+        except ValueError:
+            logger.warning(f"Invalid debounce_unsafe value: {debounce_unsafe}")
+        
+        # Handle unsafe conditions from radio buttons
         unsafe_conditions = []
         for condition in all_available_conditions:
-            if request.form.get(f'unsafe_{condition}'):
+            safety_choice = request.form.get(f'safety_{condition}')
+            if safety_choice == 'unsafe':
                 unsafe_conditions.append(condition)
         
         safety_monitor.alpaca_config.unsafe_conditions = unsafe_conditions
         # Update the in-memory set to match the new configuration
         safety_monitor._unsafe_conditions_set = set(unsafe_conditions)
         
-        # Recalculate cached safety status with new unsafe conditions
+        # Handle class-specific thresholds
+        class_thresholds = {}
+        for condition in all_available_conditions:
+            threshold_value = request.form.get(f'threshold_{condition}', '').strip()
+            if threshold_value:
+                try:
+                    threshold = float(threshold_value)
+                    if 0 <= threshold <= 100:
+                        class_thresholds[condition] = threshold
+                    else:
+                        logger.warning(f"Threshold for {condition} out of range: {threshold}")
+                except ValueError:
+                    logger.warning(f"Invalid threshold for {condition}: {threshold_value}")
+        
+        safety_monitor.alpaca_config.class_thresholds = class_thresholds
+        logger.info(f"Class thresholds updated: {class_thresholds}")
+        
+        # Recalculate cached safety status with new configuration
         with safety_monitor.detection_lock:
+            # Reset debounce state when configuration changes
+            safety_monitor._pending_safe_state = None
+            safety_monitor._state_change_start_time = None
             safety_monitor._update_cached_safety(safety_monitor.latest_detection)
         
         logger.info(f"Unsafe conditions updated to: {unsafe_conditions}")
         
         # Save configuration to file
         safety_monitor.alpaca_config.save_to_file()
+        
+        # Trigger immediate detection with new settings
+        logger.info("Triggering immediate detection after config save")
+        try:
+            result = safety_monitor.cloud_detector.detect()
+            result['timestamp'] = get_current_time(safety_monitor.alpaca_config.timezone)
+            with safety_monitor.detection_lock:
+                safety_monitor.latest_detection = result
+                safety_monitor._update_cached_safety(result)
+            logger.info(f"Immediate detection after config save: {result['class_name']} ({result['confidence_score']:.1f}%)")
+        except Exception as e:
+            logger.error(f"Immediate detection after config save failed: {e}")
         
         # Redirect to prevent form resubmission (Post/Redirect/Get pattern)
         return redirect(url_for('setup_device', device_number=device_number))
@@ -656,7 +960,7 @@ def setup_device(device_number: int):
             }
             
             .container {
-                max-width: 900px;
+                max-width: 1400px;
                 margin: 50px auto;
                 position: relative;
                 z-index: 1;
@@ -668,7 +972,7 @@ def setup_device(device_number: int):
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 12px;
                 padding: 32px 30px;
-                text-align: center;
+                text-align: left;
                 position: relative;
                 margin-bottom: 24px;
                 box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
@@ -678,25 +982,25 @@ def setup_device(device_number: int):
                 position: absolute;
                 top: 20px;
                 right: 20px;
-                background: rgba(255, 255, 255, 0.05);
-                color: rgb(34, 211, 238);
-                padding: 8px 16px;
-                border-radius: 6px;
+                background: rgba(6, 182, 212, 0.15);
+                color: rgb(255, 255, 255);
+                padding: 10px 20px;
+                border-radius: 8px;
                 text-decoration: none;
-                font-size: 13px;
-                font-weight: 500;
+                font-size: 14px;
+                font-weight: 600;
                 transition: all 0.3s ease;
-                border: 1px solid rgba(6, 182, 212, 0.3);
+                border: 2px solid rgba(6, 182, 212, 0.6);
                 display: inline-flex;
                 align-items: center;
-                gap: 6px;
+                gap: 8px;
             }
             
             .github-btn:hover {
-                background: rgba(6, 182, 212, 0.1);
+                background: rgba(6, 182, 212, 0.25);
                 border-color: rgb(6, 182, 212);
-                box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
                 transform: translateY(-2px);
+                color: rgb(34, 211, 238);
             }
             
             h1 {
@@ -712,16 +1016,289 @@ def setup_device(device_number: int):
                 color: rgb(34, 211, 238);
             }
             
-            .content {
+            .main-content {
                 background: rgba(15, 23, 42, 0.6);
                 backdrop-filter: blur(12px);
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 12px;
-                padding: 30px;
+                padding: 32px;
                 box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
+                margin-bottom: 24px;
             }
             
-            h2 {
+            .section {
+                margin-bottom: 32px;
+            }
+            
+            .section:last-child {
+                margin-bottom: 0;
+            }
+            
+            .section-header {
+                color: #ffffff;
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                margin: 0 0 16px 0;
+                text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+                border-bottom: 2px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 10px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .section-header .icon {
+                font-size: 24px;
+            }
+            
+            .section-header .highlight {
+                color: rgb(34, 211, 238);
+            }
+            
+            .status-grid {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+            
+            .status-card {
+                background: rgba(10, 15, 24, 0.9);
+                padding: 16px;
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .status-card-large {
+                background: transparent;
+                padding: 24px;
+            }
+            
+            .status-card-title {
+                color: rgb(34, 211, 238);
+                font-weight: 600;
+                font-size: 14px;
+                margin-bottom: 10px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .detection-title {
+                font-size: 18px;
+                color: rgb(34, 211, 238);
+                font-weight: 700;
+            }
+            
+            .detection-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 16px;
+                margin-top: 16px;
+            }
+            
+            .detection-item {
+                background: rgba(15, 23, 42, 0.6);
+                padding: 14px;
+                border-radius: 6px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .detection-label {
+                color: rgb(148, 163, 184);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 6px;
+            }
+            
+            .detection-value {
+                color: rgb(226, 232, 240);
+                font-size: 20px;
+                font-weight: 700;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .detection-sub {
+                color: rgb(100, 116, 139);
+                font-size: 11px;
+                margin-top: 4px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .collapsible-btn {
+                width: 100%;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                color: rgb(226, 232, 240);
+                padding: 14px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+                text-align: left;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                transition: all 0.2s ease;
+                margin: 0;
+                text-transform: none;
+                letter-spacing: 0;
+            }
+            
+            .collapsible-btn:hover {
+                background: rgba(15, 23, 42, 0.8);
+                border-color: rgba(71, 85, 105, 0.8);
+                transform: none;
+            }
+            
+            .collapsible-btn .icon {
+                font-size: 16px;
+            }
+            
+            .collapsible-btn .arrow {
+                transition: transform 0.2s ease;
+                font-size: 12px;
+            }
+            
+            .collapsible-btn.active .arrow {
+                transform: rotate(180deg);
+            }
+            
+            .collapsible-content {
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+                background: rgba(10, 15, 24, 0.6);
+                border-radius: 0 0 6px 6px;
+                margin-top: -1px;
+            }
+            
+            .collapsible-content.open {
+                max-height: 3000px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                border-top: none;
+            }
+            
+            .collapsible-inner {
+                padding: 16px;
+            }
+            
+            .status-card p {
+                margin: 6px 0;
+                color: rgb(148, 163, 184);
+                line-height: 1.6;
+                font-size: 13px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .status-card strong {
+                color: rgb(226, 232, 240);
+                font-weight: 600;
+            }
+            
+            .param-guide {
+                background: linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, rgba(6, 182, 212, 0.02) 100%);
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(6, 182, 212, 0.2);
+            }
+            
+            .param-guide-title {
+                color: rgb(34, 211, 238);
+                font-weight: 700;
+                font-size: 16px;
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .param-item {
+                margin: 12px 0;
+                padding: 12px;
+                background: rgba(15, 23, 42, 0.4);
+                border-left: 3px solid;
+                border-radius: 4px;
+            }
+            
+            .param-item.safe {
+                border-color: rgb(52, 211, 153);
+            }
+            
+            .param-item.unsafe {
+                border-color: rgb(248, 113, 113);
+            }
+            
+            .param-item.threshold {
+                border-color: rgb(251, 191, 36);
+            }
+            
+            .param-item strong {
+                display: block;
+                font-size: 13px;
+                margin-bottom: 4px;
+                font-weight: 600;
+            }
+            
+            .param-item.safe strong {
+                color: rgb(52, 211, 153);
+            }
+            
+            .param-item.unsafe strong {
+                color: rgb(248, 113, 113);
+            }
+            
+            .param-item.threshold strong {
+                color: rgb(251, 191, 36);
+            }
+            
+            .param-item span {
+                color: rgb(148, 163, 184);
+                font-size: 12px;
+                line-height: 1.5;
+                font-family: 'Inter', sans-serif;
+            }
+            
+            .input-group {
+                margin-bottom: 20px;
+            }
+            
+            .input-group:last-child {
+                margin-bottom: 0;
+            }
+            
+            .input-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-bottom: 16px;
+            }
+            
+            @media (max-width: 768px) {
+                .input-row {
+                    grid-template-columns: 1fr;
+                }
+                
+                .input-group > div[style*="grid-template-columns: 1fr 1fr"] {
+                    grid-template-columns: 1fr !important;
+                }
+            }
+            
+            @media (max-width: 1200px) {
+                .section > div[style*="grid-template-columns"] {
+                    grid-template-columns: 1fr !important;
+                }
+                
+                .param-guide {
+                    position: static !important;
+                    margin-bottom: 24px;
+                }
+            }
                 color: rgb(34, 211, 238);
                 margin-top: 30px;
                 margin-bottom: 15px;
@@ -816,27 +1393,95 @@ def setup_device(device_number: int):
                 letter-spacing: 0;
             }
             
+            /* Safety Configuration Boxes */
+            .safety-box {
+                background: rgba(10, 15, 24, 0.9);
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                overflow: hidden;
+            }
+            
+            .safety-box-header {
+                padding: 16px;
+                font-weight: 600;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                border-bottom: 2px solid;
+            }
+            
+            .safe-box {
+                border-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .safe-header {
+                background: rgba(52, 211, 153, 0.1);
+                color: rgb(52, 211, 153);
+                border-bottom-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .unsafe-box {
+                border-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            .unsafe-header {
+                background: rgba(248, 113, 113, 0.1);
+                color: rgb(248, 113, 113);
+                border-bottom-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            .safety-box-content {
+                padding: 16px;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            
+            .condition-item {
+                padding: 12px;
+                margin-bottom: 12px;
+                background: rgba(15, 23, 42, 0.6);
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                transition: all 0.3s ease;
+            }
+            
+            .condition-item:last-child {
+                margin-bottom: 0;
+            }
+            
+            .safe-condition:hover {
+                background: rgba(52, 211, 153, 0.05);
+                border-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .unsafe-condition:hover {
+                background: rgba(248, 113, 113, 0.05);
+                border-color: rgba(248, 113, 113, 0.3);
+            }
+            
             button {
-                background: rgb(6, 182, 212);
-                color: rgb(2, 6, 23);
-                padding: 14px 28px;
-                border: none;
+                background: rgba(6, 182, 212, 0.7);
+                color: rgb(226, 232, 240);
+                padding: 12px 24px;
+                border: 1px solid rgba(6, 182, 212, 0.5);
                 border-radius: 6px;
                 cursor: pointer;
-                font-size: 15px;
-                font-weight: 700;
+                font-size: 14px;
+                font-weight: 600;
                 width: 100%;
                 margin-top: 24px;
                 transition: all 0.3s ease;
-                box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
                 text-transform: uppercase;
-                letter-spacing: 1px;
+                letter-spacing: 0.5px;
             }
             
             button:hover {
-                background: rgb(8, 145, 178);
-                box-shadow: 0 0 30px rgba(6, 182, 212, 0.6);
-                transform: translateY(-2px);
+                background: rgba(6, 182, 212, 0.85);
+                border-color: rgb(6, 182, 212);
+                transform: translateY(-1px);
             }
             
             button:active {
@@ -942,75 +1587,777 @@ def setup_device(device_number: int):
         <div class="container">
             <div class="header">
                 <a href="https://github.com/chvvkumar/simpleCloudDetect" target="_blank" class="github-btn">
+                    GitHub
                     <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
                     </svg>
-                    GitHub
                 </a>
-                <h1>☁️ Simple<span class="highlight">Cloud</span>Detect <span class="highlight">Setup</span></h1>
+                <h1>☁️ Simple<span class="highlight">Cloud</span>Detect</h1>
             </div>
             
-            <div class="content">
+            <div class="main-content">
                 {% if message %}
                 <div class="message">✓ {{ message }}</div>
                 {% endif %}
                 
-                <div class="info">
-                    <div class="info-title">⚡ Detection Status</div>
-                    <p>Condition: <strong>{{ current_condition }}</strong></p>
-                    <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
-                    <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
-                    <p>Last Updated: <strong>{{ last_update }}</strong></p>
-                </div>
-                
-                <div class="info">
-                    <div class="info-title">🔌 ASCOM Connection</div>
-                    <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
-                    {% if connection_duration %}
-                    <p>Duration: <strong>{{ connection_duration }}</strong></p>
-                    {% endif %}
-                </div>
-                
-                <div class="info">
-                    <div class="info-title">⚙️ Current Configuration</div>
-                    <p>Device Name: <strong>{{ current_name }}</strong></p>
-                    <p>Location: <strong>{{ current_location }}</strong></p>
-                    <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
-                    <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
-                </div>
-                
-                <form method="POST">
-                    <div class="form-group">
-                        <label for="device_name">Device Name</label>
-                        <input type="text" id="device_name" name="device_name" class="glow-input"
-                               value="{{ current_name }}" placeholder="Enter device name">
+                <!-- Status Overview Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="icon">📊</span>
+                        <span>System <span class="highlight">Status</span></span>
                     </div>
                     
-                    <div class="form-group">
-                        <label for="location">Location</label>
-                        <input type="text" id="location" name="location" class="glow-input"
-                               value="{{ current_location }}" placeholder="Enter location">
-                    </div>
-                    
-                    <div class="form-group">
-                        <h2>🛡️ Safety Configuration</h2>
-                        <label>Mark conditions that are UNSAFE for observing</label>
-                        <div class="help-text">Unchecked conditions will be considered SAFE</div>
-                        <div class="checkbox-group">
-                            {% for condition in all_conditions %}
-                            <div class="checkbox-item">
-                                <input type="checkbox" 
-                                       id="unsafe_{{ condition }}" 
-                                       name="unsafe_{{ condition }}"
-                                       {% if condition in unsafe_conditions %}checked{% endif %}>
-                                <label for="unsafe_{{ condition }}">{{ condition }}</label>
+                    <div class="status-grid">
+                        <!-- Current Detection - Prominent -->
+                        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
+                            <!-- Current Detection - Prominent -->
+                            <div class="status-card status-card-large">
+                                <div class="status-card-title detection-title">⚡ Current Detection</div>
+                                <div class="detection-grid">
+                                    <div class="detection-item">
+                                        <div class="detection-label">Condition</div>
+                                        <div class="detection-value">{{ current_condition }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Confidence</div>
+                                        <div class="detection-value">{{ current_confidence }}%</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">ASCOM Status</div>
+                                        <div class="detection-value" style="color: {{ ascom_safe_color }};">{{ ascom_safe_status }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Detection Time</div>
+                                        <div class="detection-value">{{ detection_time }}s</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Last Updated</div>
+                                        <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
+                                    </div>
+                                </div>
                             </div>
-                            {% endfor %}
+                            
+                            <!-- Safety State History -->
+                            <div class="status-card">
+                                <div class="status-card-title">📜 Safety History</div>
+                                <div style="max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+                                    {% if safety_history %}
+                                        {% for entry in safety_history %}
+                                        <div style="padding: 4px 8px; border-bottom: 1px solid rgba(71, 85, 105, 0.3); display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="color: {{ 'rgb(52, 211, 153)' if entry.is_safe else 'rgb(248, 113, 113)' }}; font-weight: 600;">
+                                                {{ '✓ SAFE' if entry.is_safe else '⚠ UNSAFE' }}
+                                            </span>
+                                            <span style="color: rgb(148, 163, 184); font-size: 10px;">{{ entry.time }}</span>
+                                        </div>
+                                        <div style="padding: 2px 8px 6px 8px; font-size: 10px; color: rgb(148, 163, 184);">
+                                            {{ entry.condition }} ({{ entry.confidence }}%)
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div style="padding: 12px; text-align: center; color: rgb(148, 163, 184); font-size: 12px;">
+                                            No state changes yet
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- ASCOM Connection & Device Info - Horizontal Layout -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                            <!-- ASCOM Connection - Collapsible -->
+                            <div>
+                                <button class="collapsible-btn" onclick="toggleCollapsible('ascom-details')">
+                                    <span><span class="icon">🔌</span> ASCOM Connection: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="ascom-details" class="collapsible-content">
+                                    <div class="collapsible-inner">
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span>
+                                        </p>
+                                        {% if connection_duration %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
+                                        </p>
+                                        {% endif %}
+                                        {% if last_connected %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Last Connected: <strong style="color: rgb(226, 232, 240);">{{ last_connected }}</strong>
+                                        </p>
+                                        {% endif %}
+                                        {% if client_ip %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Client: <strong style="color: rgb(226, 232, 240);">{{ client_ip }}</strong>
+                                        </p>
+                                        {% endif %}
+                                        {% if last_disconnected %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Last Disconnected: <strong style="color: rgb(226, 232, 240);">{{ last_disconnected }}</strong>
+                                        </p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Device Info - Collapsible -->
+                            <div>
+                                <button class="collapsible-btn" onclick="toggleCollapsible('device-details')">
+                                    <span><span class="icon">⚙️</span> Device Information</span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="device-details" class="collapsible-content">
+                                    <div class="collapsible-inner">
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Name: <strong style="color: rgb(226, 232, 240);">{{ current_name }}</strong>
+                                        </p>
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Location: <strong style="color: rgb(226, 232, 240);">{{ current_location }}</strong>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </div>
+                
+                <script>
+                function toggleCollapsible(id) {
+                    const content = document.getElementById(id);
+                    const btn = content.previousElementSibling;
                     
-                    <button type="submit">Save Configuration</button>
-                </form>
+                    if (content.classList.contains('open')) {
+                        content.classList.remove('open');
+                        btn.classList.remove('active');
+                    } else {
+                        content.classList.add('open');
+                        btn.classList.add('active');
+                    }
+                }
+                
+                // Auto-refresh system status
+                function updateSystemStatus() {
+                    fetch(window.location.href)
+                        .then(response => response.text())
+                        .then(html => {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(html, 'text/html');
+                            
+                            // Update Current Detection values
+                            const detectionGrid = document.querySelector('.detection-grid');
+                            const newDetectionGrid = doc.querySelector('.detection-grid');
+                            if (detectionGrid && newDetectionGrid) {
+                                detectionGrid.innerHTML = newDetectionGrid.innerHTML;
+                            }
+                            
+                            // Update Safety History
+                            const safetyHistory = document.querySelector('.status-card:has(.status-card-title:contains("📜 Safety History"))');
+                            const newSafetyHistory = doc.querySelector('.status-card:has(.status-card-title:contains("📜 Safety History"))');
+                            if (safetyHistory && newSafetyHistory) {
+                                const oldScrollTop = safetyHistory.querySelector('div[style*="overflow-y"]')?.scrollTop || 0;
+                                safetyHistory.innerHTML = newSafetyHistory.innerHTML;
+                                const scrollDiv = safetyHistory.querySelector('div[style*="overflow-y"]');
+                                if (scrollDiv) scrollDiv.scrollTop = oldScrollTop;
+                            }
+                            
+                            // Update ASCOM Connection details
+                            const ascomDetails = document.getElementById('ascom-details');
+                            const newAscomDetails = doc.getElementById('ascom-details');
+                            if (ascomDetails && newAscomDetails) {
+                                ascomDetails.innerHTML = newAscomDetails.innerHTML;
+                            }
+                        })
+                        .catch(error => console.error('Error updating status:', error));
+                }
+                
+                // Update every 5 seconds
+                setInterval(updateSystemStatus, 5000);
+                </script>
+                
+                <!-- Configuration Form Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="icon">🛠️</span>
+                        <span>Configuration <span class="highlight">Settings</span></span>
+                    </div>
+                    
+                    <form method="POST">
+                                <!-- Parameter Guide (moved from sidebar) -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('param-guide')">
+                                        <span><span class="icon">📖</span> Parameter Guide</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="param-guide" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="param-item" style="border-color: rgb(59, 130, 246);">
+                                                <strong style="color: rgb(59, 130, 246);">Image Fetch Interval</strong>
+                                                <span>How often to download new images from AllSky camera and run AI analysis. Lower values = faster response but higher CPU usage.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(59, 130, 246, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(59, 130, 246); font-size: 12px;">Recommended:</strong><br>
+                                                    • Fast response: 15-30s<br>
+                                                    • Balanced: 30-60s<br>
+                                                    • Resource efficient: 60-120s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item" style="border-color: rgb(236, 72, 153);">
+                                                <strong style="color: rgb(236, 72, 153);">ASCOM Update Interval</strong>
+                                                <span>How often to re-check safety status. Should be ≥ Image Fetch Interval.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(236, 72, 153, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(236, 72, 153); font-size: 12px;">Rule:</strong> Set equal to Image Fetch Interval for efficiency.
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item safe">
+                                                <strong>Safe Wait Time</strong>
+                                                <span>How long the sky must remain clear before the system reports "Safe".</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(52, 211, 153, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Why it matters:</strong><br>
+                                                    Prevents opening the observatory roof during brief breaks in storms or passing clouds. 
+                                                    Set higher (e.g., 300s = 5 min) for unstable weather patterns.<br><br>
+                                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Recommended:</strong><br>
+                                                    • Stable climate: 60-120s<br>
+                                                    • Variable weather: 180-300s<br>
+                                                    • Storm-prone areas: 300-600s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item unsafe">
+                                                <strong>Unsafe Wait Time (Debounce to Unsafe)</strong>
+                                                <span>How long bad weather must persist before the system reports "Unsafe".</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(248, 113, 113, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Why it matters:</strong><br>
+                                                    Controls emergency response speed. Setting to 0 triggers immediate roof closure at first sign of danger. 
+                                                    Higher values (10-30s) can filter out brief sensor glitches.<br><br>
+                                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Recommended:</strong><br>
+                                                    • Automated roof: 0s (immediate)<br>
+                                                    • Manual operation: 5-10s<br>
+                                                    • Glitch filtering: 10-30s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item threshold">
+                                                <strong>Confidence Threshold</strong>
+                                                <span>Minimum AI confidence (%) required to trigger each weather condition.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(251, 191, 36, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">📊 Key Concept:</strong><br>
+                                                    <strong>Higher threshold = Less sensitive</strong> (AI must be more confident)<br>
+                                                    <strong>Lower threshold = More sensitive</strong> (AI triggers with less certainty)<br><br>
+                                                    
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">How it works:</strong><br>
+                                                    If set to 80% for "Rain", the AI must be 80% confident it's raining to trigger. 
+                                                    Lower = more sensitive (fewer misses, more false alarms). Higher = less sensitive (more misses, fewer false alarms).<br><br>
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">Tuning tips:</strong><br>
+                                                    • Start at 50% (default)<br>
+                                                    • Lower for critical conditions (Rain: 40-50%)<br>
+                                                    • Higher for uncertain conditions (Overcast: 60-70%)<br>
+                                                    • Adjust based on false alarm rate
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Basic Settings -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('basic-settings')">
+                                        <span><span class="icon">⚙️</span> Basic Settings</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="basic-settings" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="device_name">Device Name</label>
+                                                        <input type="text" id="device_name" name="device_name" class="glow-input"
+                                                               value="{{ current_name }}" placeholder="Enter device name">
+                                                    </div>
+                                                    
+                                                    <div class="form-group">
+                                                        <label for="location">Location</label>
+                                                        <input type="text" id="location" name="location" class="glow-input"
+                                                               value="{{ current_location }}" placeholder="Enter location">
+                                                    </div>
+                                                </div>
+                                                <div class="input-row">
+                                                    <div class="form-group" style="grid-column: span 2;">
+                                                        <label for="image_url">Image Source URL</label>
+                                                        <input type="text" id="image_url" name="image_url" class="glow-input"
+                                                               value="{{ current_image_url }}" placeholder="{{ image_url_default }}">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            URL to fetch images for cloud detection. Leave empty to use environment variable default.
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="ntp_server">NTP Server</label>
+                                                        <input type="text" id="ntp_server" name="ntp_server" class="glow-input"
+                                                               value="{{ current_ntp_server }}" placeholder="pool.ntp.org">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Time server for accurate timestamps
+                                                        </small>
+                                                    </div>
+                                                    
+                                                    <div class="form-group">
+                                                        <label for="timezone">Timezone</label>
+                                                        <input type="text" id="timezone" name="timezone" class="glow-input"
+                                                               value="{{ current_timezone }}" placeholder="UTC">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            e.g., America/New_York, Europe/London, UTC
+                                                            <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" style="color: rgb(6, 182, 212); text-decoration: none; margin-left: 8px;">📖 Reference</a>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Timing Configuration -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('timing-config')">
+                                        <span><span class="icon">⏱️</span> Timing Configuration</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="timing-config" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                    
+                                    <!-- How It Works Visualization -->
+                                    <div style="margin-bottom: 24px; padding: 20px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgb(51, 65, 85); border-radius: 8px;">
+                                        <h3 style="color: rgb(226, 232, 240); font-size: 14px; font-weight: 600; margin-bottom: 16px;">How Timing Works</h3>
+                                        
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                                            <!-- Fetch Image Card -->
+                                            <div style="background: rgba(59, 130, 246, 0.1); border: 2px solid rgba(59, 130, 246, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(59, 130, 246); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">📷</div>
+                                                    <div>
+                                                        <div style="color: rgb(59, 130, 246); font-weight: 600; font-size: 13px;">FETCH IMAGE</div>
+                                                        <div id="fetch-display" style="color: rgb(148, 163, 184); font-size: 11px;">Every 60s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Downloads latest image from AllSky camera and runs AI analysis to detect weather conditions
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- ASCOM Update Card -->
+                                            <div style="background: rgba(236, 72, 153, 0.1); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(236, 72, 153); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">🔄</div>
+                                                    <div>
+                                                        <div style="color: rgb(236, 72, 153); font-weight: 600; font-size: 13px;">ASCOM UPDATE</div>
+                                                        <div id="ascom-display" style="color: rgb(148, 163, 184); font-size: 11px;">Every 30s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Re-checks safety status using latest detection result and applies debounce logic
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Safe Debounce Card -->
+                                            <div style="background: rgba(52, 211, 153, 0.1); border: 2px solid rgba(52, 211, 153, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(52, 211, 153); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">✓</div>
+                                                    <div>
+                                                        <div style="color: rgb(52, 211, 153); font-weight: 600; font-size: 13px;">SAFE WAIT TIME</div>
+                                                        <div id="safe-display" style="color: rgb(148, 163, 184); font-size: 11px;">60s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    How long sky must <strong>stay clear</strong> before reporting "Safe" - prevents premature roof opening
+                                                </div>
+                                                <div id="safe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(52, 211, 153, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
+                                            
+                                            <!-- Unsafe Debounce Card -->
+                                            <div style="background: rgba(248, 113, 113, 0.1); border: 2px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(248, 113, 113); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">⚡</div>
+                                                    <div>
+                                                        <div style="color: rgb(248, 113, 113); font-weight: 600; font-size: 13px;">UNSAFE WAIT TIME</div>
+                                                        <div id="unsafe-display" style="color: rgb(148, 163, 184); font-size: 11px;">Immediate</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    How long bad weather must persist before reporting "Unsafe" - 0 = instant roof closure
+                                                </div>
+                                                <div id="unsafe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(248, 113, 113, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Example Scenario -->
+                                        <div id="scenario-example" style="margin-top: 20px; padding: 16px; background: rgba(30, 41, 59, 0.6); border-radius: 8px; border-left: 4px solid rgb(251, 191, 36);">
+                                            <div style="color: rgb(251, 191, 36); font-weight: 600; font-size: 12px; margin-bottom: 8px;">💡 EXAMPLE SCENARIO</div>
+                                            <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.6;"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="detection_interval">Image Fetch Interval (seconds)</label>
+                                            <input type="number" id="detection_interval" name="detection_interval" 
+                                                   value="{{ detection_interval }}" min="5" max="300" step="1" placeholder="30"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">How often to fetch & analyze new images from AllSky camera</p>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="update_interval">ASCOM Update Interval (seconds)</label>
+                                            <input type="number" id="update_interval" name="update_interval" 
+                                                   value="{{ update_interval }}" min="5" max="300" step="1" placeholder="30"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">How often to check safety status</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="debounce_safe" style="color: rgb(52, 211, 153);">Safe Wait Time (seconds)</label>
+                                            <input type="number" id="debounce_safe" name="debounce_safe" 
+                                                   value="{{ debounce_to_safe }}" min="0" max="3600" step="1" placeholder="60"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Delay before reporting safe conditions</p>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="debounce_unsafe" style="color: rgb(248, 113, 113);">Unsafe Wait Time (seconds)</label>
+                                            <input type="number" id="debounce_unsafe" name="debounce_unsafe" 
+                                                   value="{{ debounce_to_unsafe }}" min="0" max="3600" step="1" placeholder="0"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Delay before reporting unsafe conditions (0 = immediate)</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <script>
+                                    function updateTimingVisualization() {
+                                        const detectionInterval = parseInt(document.getElementById('detection_interval').value) || 30;
+                                        const updateInterval = parseInt(document.getElementById('update_interval').value) || 30;
+                                        const debounceSafe = parseInt(document.getElementById('debounce_safe').value) || 60;
+                                        const debounceUnsafe = parseInt(document.getElementById('debounce_unsafe').value) || 0;
+                                        
+                                        // Update displays
+                                        document.getElementById('fetch-display').textContent = `Every ${detectionInterval}s`;
+                                        document.getElementById('ascom-display').textContent = `Every ${updateInterval}s`;
+                                        document.getElementById('safe-display').textContent = debounceSafe > 0 ? `${debounceSafe}s` : 'None';
+                                        document.getElementById('unsafe-display').textContent = debounceUnsafe > 0 ? `${debounceUnsafe}s` : 'Immediate';
+                                        
+                                        // Calculate coverage info
+                                        if (debounceSafe > 0) {
+                                            const checksNeeded = Math.ceil(debounceSafe / detectionInterval);
+                                            document.getElementById('safe-coverage').innerHTML = 
+                                                `<strong>Requires ${checksNeeded} consecutive clear detections</strong> (${checksNeeded} × ${detectionInterval}s = ${checksNeeded * detectionInterval}s)`;
+                                        } else {
+                                            document.getElementById('safe-coverage').textContent = 'Reports safe immediately after first clear detection';
+                                        }
+                                        
+                                        if (debounceUnsafe > 0) {
+                                            const checksNeeded = Math.ceil(debounceUnsafe / detectionInterval);
+                                            document.getElementById('unsafe-coverage').innerHTML = 
+                                                `<strong>Requires ${checksNeeded} consecutive bad detections</strong> (${checksNeeded} × ${detectionInterval}s = ${checksNeeded * detectionInterval}s)`;
+                                        } else {
+                                            document.getElementById('unsafe-coverage').textContent = 'Reports unsafe immediately - closes roof on first bad detection';
+                                        }
+                                        
+                                        // Generate example scenario
+                                        const scenarioDiv = document.querySelector('#scenario-example > div:last-child');
+                                        let scenario = '';
+                                        
+                                        if (updateInterval < detectionInterval) {
+                                            scenario = `⚠️ <strong>Warning:</strong> ASCOM checks every ${updateInterval}s but new data only arrives every ${detectionInterval}s. You'll check the same result ${Math.floor(detectionInterval/updateInterval)} times before getting new data.`;
+                                        } else {
+                                            // Safe scenario
+                                            let safeScenario = '';
+                                            if (debounceSafe > 0) {
+                                                const checksNeeded = Math.ceil(debounceSafe / detectionInterval);
+                                                safeScenario = `Clouds clear at 00:00 → AI detects "Clear" every ${detectionInterval}s → After ${checksNeeded} detections (${checksNeeded * detectionInterval}s total) → Reports <strong style="color: rgb(52, 211, 153);">SAFE</strong> at ${formatTime(checksNeeded * detectionInterval)}`;
+                                            } else {
+                                                safeScenario = `Clouds clear at 00:00 → AI detects "Clear" at ${formatTime(detectionInterval)} → Immediately reports <strong style="color: rgb(52, 211, 153);">SAFE</strong>`;
+                                            }
+                                            
+                                            // Unsafe scenario
+                                            let unsafeScenario = '';
+                                            if (debounceUnsafe > 0) {
+                                                const checksNeeded = Math.ceil(debounceUnsafe / detectionInterval);
+                                                unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" every ${detectionInterval}s → After ${checksNeeded} detections (${checksNeeded * detectionInterval}s total) → Reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> at ${formatTime(checksNeeded * detectionInterval)}`;
+                                            } else {
+                                                unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" at ${formatTime(detectionInterval)} → ⚡ Immediately reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> (roof closes!)`;
+                                            }
+                                            
+                                            scenario = safeScenario + unsafeScenario;
+                                        }
+                                        
+                                        scenarioDiv.innerHTML = scenario;
+                                    }
+                                    
+                                    function formatTime(seconds) {
+                                        const mins = Math.floor(seconds / 60);
+                                        const secs = seconds % 60;
+                                        return mins > 0 ? `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `00:${String(secs).padStart(2, '0')}`;
+                                    }
+                                    </script>
+                                    
+                                    <script>
+                                    // Validate timing configuration for safety
+                                    function validateTiming() {
+                                        // Update timing visualization
+                                        updateTimingVisualization();
+                                    }
+                                    
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const timingInputs = ['detection_interval', 'update_interval', 'debounce_safe', 'debounce_unsafe'];
+                                        timingInputs.forEach(id => {
+                                            const input = document.getElementById(id);
+                                            if (input) {
+                                                input.addEventListener('input', validateTiming);
+                                                input.addEventListener('change', validateTiming);
+                                            }
+                                        });
+                                        validateTiming();
+                                    });
+                                    </script>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Safety Configuration -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('safety-config')">
+                                        <span><span class="icon">🛡️</span> Safety Classification</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="safety-config" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                    <p class="help-text" style="margin-bottom: 16px;">
+                                        Mark each weather condition as <strong style="color: rgb(52, 211, 153);">Safe</strong> or <strong style="color: rgb(248, 113, 113);">Unsafe</strong> for observatory operations.
+                                    </p>
+                                    
+                                    <!-- Safe Conditions -->
+                                    <div id="safe-section" style="margin-bottom: 20px;">
+                                        <h3 style="color: rgb(52, 211, 153); font-size: 14px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Safe Conditions</h3>
+                                        <div id="safe-conditions" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 12px;">
+                                            {% for condition in safe_conditions %}
+                                            <div class="condition-card" data-condition="{{ condition }}" data-safety="safe" style="padding: 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; color: rgb(226, 232, 240); font-size: 14px;">{{ condition }}</div>
+                                                    <div style="display: flex; gap: 16px;">
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="safe" checked 
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(52, 211, 153); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(52, 211, 153); font-weight: 500; font-size: 13px;">Safe</span>
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="unsafe"
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(248, 113, 113); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(248, 113, 113); font-weight: 500; font-size: 13px;">Unsafe</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 80px;">Threshold:</label>
+                                                    <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
+                                                           value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
+                                                           class="threshold-input" data-condition="{{ condition }}"
+                                                           style="width: 60px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184); min-width: 16px;">%</span>
+                                                    
+                                                    <!-- Threshold Bar Visualization -->
+                                                    <div style="flex: 1; position: relative; height: 20px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                        <div id="bar_below_{{ condition }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ class_thresholds.get(condition, default_threshold) }}%; background: rgba(100, 116, 139, 0.4); transition: width 0.2s ease;"></div>
+                                                        <div id="bar_above_{{ condition }}" style="position: absolute; top: 0; bottom: 0; right: 0; width: {{ 100 - class_thresholds.get(condition, default_threshold) }}%; background: rgba(52, 211, 153, 0.6); transition: width 0.2s ease, background 0.2s ease;"></div>
+                                                        <div id="bar_marker_{{ condition }}" style="position: absolute; top: 0; bottom: 0; left: {{ class_thresholds.get(condition, default_threshold) }}%; width: 2px; background: rgb(251, 191, 36); z-index: 10; transition: left 0.2s ease;">
+                                                            <div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: rgb(251, 191, 36); font-size: 9px; font-weight: 600; white-space: nowrap; background: rgba(15, 23, 42, 0.9); padding: 1px 4px; border-radius: 2px;">{{ class_thresholds.get(condition, default_threshold) }}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div style="min-width: 70px; font-size: 10px; color: rgb(148, 163, 184); text-align: right;">
+                                                        <span id="bar_label_{{ condition }}">✓ Triggers >{{ class_thresholds.get(condition, default_threshold) }}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Unsafe Conditions -->
+                                    <div id="unsafe-section">
+                                        <h3 style="color: rgb(248, 113, 113); font-size: 14px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Unsafe Conditions</h3>
+                                        <div id="unsafe-conditions" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px; padding: 12px;">
+                                            {% for condition in unsafe_conditions %}
+                                            <div class="condition-card" data-condition="{{ condition }}" data-safety="unsafe" style="padding: 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; color: rgb(226, 232, 240); font-size: 14px;">{{ condition }}</div>
+                                                    <div style="display: flex; gap: 16px;">
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="safe"
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(52, 211, 153); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(52, 211, 153); font-weight: 500; font-size: 13px;">Safe</span>
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="unsafe" checked
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(248, 113, 113); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(248, 113, 113); font-weight: 500; font-size: 13px;">Unsafe</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 80px;">Threshold:</label>
+                                                    <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
+                                                           value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
+                                                           class="threshold-input" data-condition="{{ condition }}"
+                                                           style="width: 60px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184); min-width: 16px;">%</span>
+                                                    
+                                                    <!-- Threshold Bar Visualization -->
+                                                    <div style="flex: 1; position: relative; height: 20px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                        <div id="bar_below_{{ condition }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ class_thresholds.get(condition, default_threshold) }}%; background: rgba(100, 116, 139, 0.4); transition: width 0.2s ease;"></div>
+                                                        <div id="bar_above_{{ condition }}" style="position: absolute; top: 0; bottom: 0; right: 0; width: {{ 100 - class_thresholds.get(condition, default_threshold) }}%; background: rgba(248, 113, 113, 0.6); transition: width 0.2s ease, background 0.2s ease;"></div>
+                                                        <div id="bar_marker_{{ condition }}" style="position: absolute; top: 0; bottom: 0; left: {{ class_thresholds.get(condition, default_threshold) }}%; width: 2px; background: rgb(251, 191, 36); z-index: 10; transition: left 0.2s ease;">
+                                                            <div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: rgb(251, 191, 36); font-size: 9px; font-weight: 600; white-space: nowrap; background: rgba(15, 23, 42, 0.9); padding: 1px 4px; border-radius: 2px;">{{ class_thresholds.get(condition, default_threshold) }}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div style="min-width: 70px; font-size: 10px; color: rgb(148, 163, 184); text-align: right;">
+                                                        <span id="bar_label_{{ condition }}">✓ Triggers >{{ class_thresholds.get(condition, default_threshold) }}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    
+                                    <script>
+                                    // Dynamic sorting when radio buttons change
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const radios = document.querySelectorAll('.safety-radio');
+                                        const safeContainer = document.getElementById('safe-conditions');
+                                        const unsafeContainer = document.getElementById('unsafe-conditions');
+                                        
+                                        // Update threshold bars dynamically
+                                        const thresholdInputs = document.querySelectorAll('.threshold-input');
+                                        thresholdInputs.forEach(input => {
+                                            input.addEventListener('input', function() {
+                                                updateThresholdBar(this.dataset.condition, parseInt(this.value) || 0);
+                                            });
+                                        });
+                                        
+                                        radios.forEach(radio => {
+                                            radio.addEventListener('change', function() {
+                                                const condition = this.dataset.condition;
+                                                const newSafety = this.value;
+                                                const card = document.querySelector(`.condition-card[data-condition="${condition}"]`);
+                                                
+                                                if (card) {
+                                                    // Update card data attribute
+                                                    card.dataset.safety = newSafety;
+                                                    
+                                                    // Move card to appropriate section
+                                                    if (newSafety === 'safe') {
+                                                        safeContainer.appendChild(card);
+                                                    } else {
+                                                        unsafeContainer.appendChild(card);
+                                                    }
+                                                    
+                                                    // Update threshold bar color to match new safety classification
+                                                    const thresholdInput = card.querySelector('.threshold-input');
+                                                    if (thresholdInput) {
+                                                        updateThresholdBar(condition, parseInt(thresholdInput.value) || 0);
+                                                    }
+                                                    
+                                                    // Add subtle animation
+                                                    card.style.animation = 'none';
+                                                    setTimeout(() => {
+                                                        card.style.animation = 'slideIn 0.3s ease';
+                                                    }, 10);
+                                                }
+                                            });
+                                        });
+                                    });
+                                    
+                                    // Update threshold bar visualization
+                                    function updateThresholdBar(condition, value) {
+                                        const barBelow = document.getElementById(`bar_below_${condition}`);
+                                        const barAbove = document.getElementById(`bar_above_${condition}`);
+                                        const barMarker = document.getElementById(`bar_marker_${condition}`);
+                                        const barLabel = document.getElementById(`bar_label_${condition}`);
+                                        
+                                        if (!barBelow || !barAbove || !barMarker || !barLabel) return;
+                                        
+                                        // Clamp value between 0 and 100
+                                        value = Math.max(0, Math.min(100, value));
+                                        
+                                        // Update widths
+                                        barBelow.style.width = value + '%';
+                                        barAbove.style.width = (100 - value) + '%';
+                                        barMarker.style.left = value + '%';
+                                        
+                                        // Update marker label
+                                        const markerLabel = barMarker.querySelector('div');
+                                        if (markerLabel) {
+                                            markerLabel.textContent = value + '%';
+                                        }
+                                        
+                                        // Update trigger label
+                                        barLabel.textContent = `✓ Triggers >${value}%`;
+                                        
+                                        // Update bar color based on current safety classification
+                                        const card = document.querySelector(`.condition-card[data-condition="${condition}"]`);
+                                        if (card) {
+                                            const isSafe = card.dataset.safety === 'safe';
+                                            barAbove.style.background = isSafe ? 'rgba(52, 211, 153, 0.6)' : 'rgba(248, 113, 113, 0.6)';
+                                        }
+                                    }
+                                    </script>
+                                    <style>
+                                    @keyframes slideIn {
+                                        from {
+                                            opacity: 0;
+                                            transform: translateX(-10px);
+                                        }
+                                        to {
+                                            opacity: 1;
+                                            transform: translateX(0);
+                                        }
+                                    }
+                                    </style>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit">💾 Save Configuration</button>
+                            </form>
+                </div>
             </div>
         </div>
     </body>
@@ -1041,7 +2388,7 @@ def setup_device(device_number: int):
         
         # Calculate connection duration
         if safety_monitor.connected_at:
-            duration = datetime.now() - safety_monitor.connected_at
+            duration = get_current_time(safety_monitor.alpaca_config.timezone) - safety_monitor.connected_at
             hours, remainder = divmod(int(duration.total_seconds()), 3600)
             minutes, seconds = divmod(remainder, 60)
             if hours > 0:
@@ -1057,11 +2404,61 @@ def setup_device(device_number: int):
         ascom_status_class = 'status-disconnected'
         connection_duration = None
     
+    # Format last connected/disconnected timestamps with current timezone
+    last_connected = None
+    if safety_monitor.last_connected_at:
+        # Convert to current timezone if different
+        try:
+            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+            converted_time = safety_monitor.last_connected_at.astimezone(tz)
+            last_connected = converted_time.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            last_connected = safety_monitor.last_connected_at.strftime('%Y-%m-%d %H:%M:%S')
+    
+    last_disconnected = None
+    if safety_monitor.disconnected_at:
+        # Convert to current timezone if different
+        try:
+            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+            converted_time = safety_monitor.disconnected_at.astimezone(tz)
+            last_disconnected = converted_time.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            last_disconnected = safety_monitor.disconnected_at.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Prepare ASCOM safe/unsafe status display
+    ascom_safe_status = 'SAFE' if safety_monitor._stable_safe_state else 'UNSAFE'
+    ascom_safe_color = 'rgb(52, 211, 153)' if safety_monitor._stable_safe_state else 'rgb(248, 113, 113)'
+    
+    # Format safety history for display (newest first) with current timezone
+    safety_history = []
+    for entry in reversed(safety_monitor._safety_history):
+        try:
+            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+            converted_time = entry['timestamp'].astimezone(tz)
+            time_str = converted_time.strftime('%H:%M:%S')
+            date_str = converted_time.strftime('%Y-%m-%d')
+        except Exception:
+            time_str = entry['timestamp'].strftime('%H:%M:%S')
+            date_str = entry['timestamp'].strftime('%Y-%m-%d')
+        
+        safety_history.append({
+            'time': time_str,
+            'date': date_str,
+            'is_safe': entry['is_safe'],
+            'status': 'SAFE' if entry['is_safe'] else 'UNSAFE',
+            'condition': entry['condition'],
+            'confidence': f"{entry['confidence']:.1f}"
+        })
+    
     return render_template_string(
         html_template,
         message=message,
         current_name=safety_monitor.alpaca_config.device_name,
         current_location=safety_monitor.alpaca_config.location,
+        current_image_url=safety_monitor.alpaca_config.image_url,
+        current_ntp_server=safety_monitor.alpaca_config.ntp_server,
+        current_timezone=safety_monitor.alpaca_config.timezone,
+        image_url_default=os.environ.get('IMAGE_URL', 'Not set in environment'),
         all_conditions=all_available_conditions,
         unsafe_conditions=unsafe_conditions,
         safe_conditions=safe_conditions,
@@ -1071,7 +2468,19 @@ def setup_device(device_number: int):
         last_update=last_update,
         ascom_status=ascom_status,
         ascom_status_class=ascom_status_class,
-        connection_duration=connection_duration
+        ascom_safe_status=ascom_safe_status,
+        ascom_safe_color=ascom_safe_color,
+        safety_history=safety_history,
+        connection_duration=connection_duration,
+        client_ip=safety_monitor.client_ip,
+        last_connected=last_connected,
+        last_disconnected=last_disconnected,
+        detection_interval=safety_monitor.alpaca_config.detection_interval,
+        update_interval=safety_monitor.alpaca_config.update_interval,
+        debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
+        debounce_to_unsafe=safety_monitor.alpaca_config.debounce_to_unsafe_sec,
+        default_threshold=safety_monitor.alpaca_config.default_threshold,
+        class_thresholds=safety_monitor.alpaca_config.class_thresholds
     )
 
 
@@ -1151,38 +2560,46 @@ class AlpacaDiscovery:
 
 
 # Initialize application at module level for gunicorn
-def create_app():
-    """Application factory for gunicorn"""
-    import os
+def main():
+    """Main entry point for Waitress-based unified service"""
+    from waitress import serve
     
     global safety_monitor, discovery_service
     
-    # Load detection configuration
+    # 1. Load Configurations
     detect_config = DetectConfig.from_env()
-    
-    # Try to load Alpaca configuration from file first
     alpaca_config = AlpacaConfig.load_from_file()
     
     if alpaca_config is None:
-        # Create default Alpaca configuration if file doesn't exist
+        # Create default config from environment
         alpaca_config = AlpacaConfig(
             port=int(os.getenv('ALPACA_PORT', '11111')),
             device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
+            detection_interval=int(os.getenv('DETECT_INTERVAL', '30')),
             update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
         )
-        # Save default config
         alpaca_config.save_to_file()
     else:
-        # Override port settings from environment if provided
+        # Override settings from environment if provided
         alpaca_config.port = int(os.getenv('ALPACA_PORT', str(alpaca_config.port)))
         alpaca_config.device_number = int(os.getenv('ALPACA_DEVICE_NUMBER', str(alpaca_config.device_number)))
+        alpaca_config.detection_interval = int(os.getenv('DETECT_INTERVAL', str(alpaca_config.detection_interval)))
         alpaca_config.update_interval = int(os.getenv('ALPACA_UPDATE_INTERVAL', str(alpaca_config.update_interval)))
     
-    # Initialize safety monitor
+    # Sync detect_config interval with alpaca_config
+    detect_config.detect_interval = alpaca_config.detection_interval
+    
+    # 2. Initialize global safety monitor
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
     
-    # Initialize and start discovery service
-    # Only start if not already running (prevents duplicate discovery in multi-worker scenarios)
+    # 3. Start detection loop (internal, always running for MQTT/web UI)
+    # This starts the detection thread but doesn't set "connected" status
+    safety_monitor.stop_detection.clear()
+    safety_monitor.detection_thread = threading.Thread(target=safety_monitor._detection_loop, daemon=True)
+    safety_monitor.detection_thread.start()
+    logger.info("Starting unified detection loop (ASCOM + MQTT)")
+    
+    # 4. Start Discovery Service
     discovery_service = AlpacaDiscovery(alpaca_config.port)
     discovery_service.start()
     
@@ -1192,27 +2609,30 @@ def create_app():
     logger.info(f"Unsafe conditions: {', '.join(alpaca_config.unsafe_conditions)}")
     logger.info(f"Safe conditions: {', '.join([c for c in ALL_CLOUD_CONDITIONS if c not in alpaca_config.unsafe_conditions])}")
     
-    return app
-
-
-def main():
-    """Main entry point for standalone execution"""
-    import os
+    # 5. Setup signal handlers for graceful shutdown
+    def handle_shutdown_signal(signum, frame):
+        logger.info(f"Received shutdown signal ({signum})")
+        try:
+            discovery_service.stop()
+            safety_monitor.disconnect()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        finally:
+            sys.exit(0)
     
-    # Create and configure app
-    application = create_app()
+    signal.signal(signal.SIGTERM, handle_shutdown_signal)
+    signal.signal(signal.SIGINT, handle_shutdown_signal)
     
-    # Get port from environment
-    port = int(os.getenv('ALPACA_PORT', '11111'))
+    # 6. Run Waitress Server (production-ready, single-process, multi-threaded)
+    logger.info(f"Starting Waitress Server on 0.0.0.0:{alpaca_config.port}")
+    logger.info("Press Ctrl+C to stop the server")
     
-    logger.info(f"Starting ASCOM Alpaca SafetyMonitor on port {port}")
-    
-    # Run Flask development server
-    application.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        serve(app, host='0.0.0.0', port=alpaca_config.port, threads=6)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+        handle_shutdown_signal(signal.SIGINT, None)
 
 
 if __name__ == '__main__':
     main()
-else:
-    # When imported by gunicorn, initialize the app
-    app = create_app()
