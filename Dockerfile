@@ -31,6 +31,7 @@ WORKDIR /app
 # Install curl for healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -43,8 +44,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code (this layer changes frequently, so it's last)
 COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
 
-# Make the startup script executable and set ownership
-RUN chmod +x start_services.sh && chown -R appuser:appuser /app
+# Fix line endings and make the startup script executable and set ownership
+RUN dos2unix start_services.sh && \
+    chmod +x start_services.sh && \
+    chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser

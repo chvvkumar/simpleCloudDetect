@@ -211,6 +211,11 @@ class CloudDetector:
 
     def _setup_mqtt(self):
         """Setup and return MQTT client"""
+        # Return None if broker is not configured
+        if not self.config.broker or self.config.broker.lower() in ['none', 'null', '']:
+            logger.warning("MQTT broker not configured, MQTT publishing disabled")
+            return None
+            
         client = mqtt.Client()
         if self.config.mqtt_username and self.config.mqtt_password:
             client.username_pw_set(self.config.mqtt_username, self.config.mqtt_password)
