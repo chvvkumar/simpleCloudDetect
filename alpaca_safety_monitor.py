@@ -182,6 +182,15 @@ class AlpacaSafetyMonitor:
             with self.detection_lock:
                 self.latest_detection = initial_result
                 self._update_cached_safety(initial_result)
+                
+                # Add initial state to safety history
+                self._safety_history.append({
+                    'timestamp': get_current_time(self.alpaca_config.timezone),
+                    'is_safe': self._stable_safe_state,
+                    'condition': initial_result.get('class_name', 'Unknown'),
+                    'confidence': initial_result.get('confidence_score', 0.0)
+                })
+                
             logger.info(f"Initial detection complete: {initial_result['class_name']}")
         except Exception as e:
             logger.error(f"Initial detection failed: {e}")
