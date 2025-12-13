@@ -35,4 +35,4 @@ Werkzeug==3.0.6
 wrapt==1.16.0
 Flask==3.0.0
 flask-cors==4.0.0
-gunicorn==23.0.0
+waitress==3.0.0

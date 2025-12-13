@@ -12,6 +12,8 @@ import socket
 import threading
 import time
 import os
+import signal
+import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -19,8 +21,9 @@ import json
 
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 from flask_cors import CORS
+import paho.mqtt.client as mqtt
 
-from detect import CloudDetector, Config as DetectConfig
+from detect import CloudDetector, Config as DetectConfig, HADiscoveryManager
 
 # Configure logging
 logging.basicConfig(
@@ -105,20 +108,23 @@ class AlpacaSafetyMonitor:
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
         
-        # Pre-load cloud detector at startup to avoid delays during connection
+        # Setup MQTT client first
+        self.mqtt_client = self._setup_mqtt()
+        self.ha_discovery = None
+        
+        # Pre-load cloud detector at startup (pass MQTT client to avoid double connection)
         logger.info("Pre-loading ML model...")
-        self.cloud_detector = CloudDetector(self.detect_config)
+        self.cloud_detector = CloudDetector(self.detect_config, mqtt_client=self.mqtt_client)
         logger.info("ML model loaded successfully")
         
-        # Perform initial detection in background to avoid blocking app startup
-        threading.Thread(target=self._initial_detection, daemon=True).start()
+        # Setup HA Discovery if enabled
+        if self.mqtt_client and self.detect_config.mqtt_discovery_mode == 'homeassistant':
+            self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client)
+            self.ha_discovery.publish_discovery_configs()
         
-        logger.info(f"Initialized {self.alpaca_config.device_name}")
-    
-    def _initial_detection(self):
-        """Perform initial detection in background"""
+        # FIX: Blocking initial detection to ensure readiness (better than background thread)
+        logger.info("Performing initial detection (blocking)...")
         try:
-            logger.info("Performing initial detection...")
             initial_result = self.cloud_detector.detect()
             initial_result['timestamp'] = datetime.now()
             with self.detection_lock:
@@ -127,6 +133,8 @@ class AlpacaSafetyMonitor:
             logger.info(f"Initial detection complete: {initial_result['class_name']}")
         except Exception as e:
             logger.error(f"Initial detection failed: {e}")
+        
+        logger.info(f"Initialized {self.alpaca_config.device_name}")
     
     def _update_cached_safety(self, detection: Dict[str, Any]):
         """Update cached safety status (assumes lock is held)"""
@@ -138,12 +146,35 @@ class AlpacaSafetyMonitor:
             cloud_condition not in self._unsafe_conditions_set
         )
     
+    def _setup_mqtt(self):
+        """Setup and return MQTT client based on detect_config"""
+        # Only setup if broker is configured
+        if not self.detect_config.broker:
+            logger.warning("MQTT broker not configured, MQTT publishing disabled")
+            return None
+            
+        client = mqtt.Client()
+        if self.detect_config.mqtt_username and self.detect_config.mqtt_password:
+            client.username_pw_set(self.detect_config.mqtt_username, self.detect_config.mqtt_password)
+        
+        # Setup Last Will Testament for HA discovery mode
+        if self.detect_config.mqtt_discovery_mode == 'homeassistant':
+            availability_topic = f"{self.detect_config.mqtt_discovery_prefix}/sensor/clouddetect_{self.detect_config.device_id}/availability"
+            client.will_set(availability_topic, "offline", retain=True)
+            
+        try:
+            client.connect(self.detect_config.broker, self.detect_config.port)
+            client.loop_start()
+            logger.info(f"Connected to MQTT broker at {self.detect_config.broker}:{self.detect_config.port}")
+            return client
+        except Exception as e:
+            logger.error(f"Failed to connect to MQTT broker: {e}")
+            return None
+    
     def get_next_transaction_id(self) -> int:
-        """Generate next server transaction ID (thread-safe)"""
+        """Generate next server transaction ID (thread-safe, wraps at uint32 max)"""
         with self.transaction_lock:
-            self.server_transaction_id += 1
-            if self.server_transaction_id > 4294967295:
-                self.server_transaction_id = 1
+            self.server_transaction_id = (self.server_transaction_id + 1) % 4294967296
             return self.server_transaction_id
     
     def create_response(self, value: Any = None, error_number: int = ERROR_SUCCESS, 
@@ -194,17 +225,31 @@ class AlpacaSafetyMonitor:
         return client_id, client_transaction_id
     
     def _detection_loop(self):
-        """Background thread for continuous cloud detection"""
-        logger.info("Starting cloud detection loop")
+        """Background thread for continuous cloud detection AND MQTT publishing"""
+        logger.info("Starting unified detection loop (ASCOM + MQTT)")
         
         while not self.stop_detection.is_set():
             try:
                 # Perform detection in background without blocking API responses
                 result = self.cloud_detector.detect()
                 result['timestamp'] = datetime.now()
+                
+                # Update ASCOM state
                 with self.detection_lock:
                     self.latest_detection = result
                     self._update_cached_safety(result)
+                
+                # Publish to MQTT (unified publishing)
+                if self.mqtt_client:
+                    try:
+                        if self.detect_config.mqtt_discovery_mode == 'homeassistant':
+                            self.ha_discovery.publish_states(result)
+                        else:
+                            # Legacy single-topic publishing
+                            self.mqtt_client.publish(self.detect_config.topic, json.dumps(result))
+                    except Exception as e:
+                        logger.error(f"MQTT publish failed: {e}")
+                
                 logger.info(f"Cloud detection: {result['class_name']} "
                            f"({result['confidence_score']:.1f}%)")
             except Exception as e:
@@ -656,7 +701,7 @@ def setup_device(device_number: int):
             }
             
             .container {
-                max-width: 900px;
+                max-width: 1400px;
                 margin: 50px auto;
                 position: relative;
                 z-index: 1;
@@ -668,7 +713,7 @@ def setup_device(device_number: int):
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 12px;
                 padding: 32px 30px;
-                text-align: center;
+                text-align: left;
                 position: relative;
                 margin-bottom: 24px;
                 box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
@@ -678,25 +723,25 @@ def setup_device(device_number: int):
                 position: absolute;
                 top: 20px;
                 right: 20px;
-                background: rgba(255, 255, 255, 0.05);
-                color: rgb(34, 211, 238);
-                padding: 8px 16px;
-                border-radius: 6px;
+                background: rgba(6, 182, 212, 0.15);
+                color: rgb(255, 255, 255);
+                padding: 10px 20px;
+                border-radius: 8px;
                 text-decoration: none;
-                font-size: 13px;
-                font-weight: 500;
+                font-size: 14px;
+                font-weight: 600;
                 transition: all 0.3s ease;
-                border: 1px solid rgba(6, 182, 212, 0.3);
+                border: 2px solid rgba(6, 182, 212, 0.6);
                 display: inline-flex;
                 align-items: center;
-                gap: 6px;
+                gap: 8px;
             }
             
             .github-btn:hover {
-                background: rgba(6, 182, 212, 0.1);
+                background: rgba(6, 182, 212, 0.25);
                 border-color: rgb(6, 182, 212);
-                box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
                 transform: translateY(-2px);
+                color: rgb(34, 211, 238);
             }
             
             h1 {
@@ -712,13 +757,42 @@ def setup_device(device_number: int):
                 color: rgb(34, 211, 238);
             }
             
-            .content {
+            .two-column-layout {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 24px;
+                align-items: start;
+            }
+            
+            @media (max-width: 1024px) {
+                .two-column-layout {
+                    grid-template-columns: 1fr;
+                }
+            }
+            
+            .left-column,
+            .right-column {
                 background: rgba(15, 23, 42, 0.6);
                 backdrop-filter: blur(12px);
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 12px;
                 padding: 30px;
                 box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
+            }
+            
+            .column-header {
+                color: #ffffff;
+                font-size: 24px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                margin: 0 0 24px 0;
+                text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+                border-bottom: 2px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 12px;
+            }
+            
+            .column-header .highlight {
+                color: rgb(34, 211, 238);
             }
             
             h2 {
@@ -817,26 +891,25 @@ def setup_device(device_number: int):
             }
             
             button {
-                background: rgb(6, 182, 212);
-                color: rgb(2, 6, 23);
-                padding: 14px 28px;
-                border: none;
+                background: rgba(6, 182, 212, 0.7);
+                color: rgb(226, 232, 240);
+                padding: 12px 24px;
+                border: 1px solid rgba(6, 182, 212, 0.5);
                 border-radius: 6px;
                 cursor: pointer;
-                font-size: 15px;
-                font-weight: 700;
+                font-size: 14px;
+                font-weight: 600;
                 width: 100%;
                 margin-top: 24px;
                 transition: all 0.3s ease;
-                box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
                 text-transform: uppercase;
-                letter-spacing: 1px;
+                letter-spacing: 0.5px;
             }
             
             button:hover {
-                background: rgb(8, 145, 178);
-                box-shadow: 0 0 30px rgba(6, 182, 212, 0.6);
-                transform: translateY(-2px);
+                background: rgba(6, 182, 212, 0.85);
+                border-color: rgb(6, 182, 212);
+                transform: translateY(-1px);
             }
             
             button:active {
@@ -942,75 +1015,83 @@ def setup_device(device_number: int):
         <div class="container">
             <div class="header">
                 <a href="https://github.com/chvvkumar/simpleCloudDetect" target="_blank" class="github-btn">
+                    GitHub
                     <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
                     </svg>
-                    GitHub
                 </a>
-                <h1>☁️ Simple<span class="highlight">Cloud</span>Detect <span class="highlight">Setup</span></h1>
+                <h1>☁️ Simple<span class="highlight">Cloud</span>Detect</h1>
             </div>
             
-            <div class="content">
-                {% if message %}
-                <div class="message">✓ {{ message }}</div>
-                {% endif %}
-                
-                <div class="info">
-                    <div class="info-title">⚡ Detection Status</div>
-                    <p>Condition: <strong>{{ current_condition }}</strong></p>
-                    <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
-                    <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
-                    <p>Last Updated: <strong>{{ last_update }}</strong></p>
-                </div>
-                
-                <div class="info">
-                    <div class="info-title">🔌 ASCOM Connection</div>
-                    <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
-                    {% if connection_duration %}
-                    <p>Duration: <strong>{{ connection_duration }}</strong></p>
+            <div class="two-column-layout">
+                <!-- Left Column: Information Display -->
+                <div class="left-column">
+                    {% if message %}
+                    <div class="message">✓ {{ message }}</div>
                     {% endif %}
-                </div>
-                
-                <div class="info">
-                    <div class="info-title">⚙️ Current Configuration</div>
-                    <p>Device Name: <strong>{{ current_name }}</strong></p>
-                    <p>Location: <strong>{{ current_location }}</strong></p>
-                    <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
-                    <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
-                </div>
-                
-                <form method="POST">
-                    <div class="form-group">
-                        <label for="device_name">Device Name</label>
-                        <input type="text" id="device_name" name="device_name" class="glow-input"
-                               value="{{ current_name }}" placeholder="Enter device name">
+                    
+                    <div class="info">
+                        <div class="info-title">⚡ Detection Status</div>
+                        <p>Condition: <strong>{{ current_condition }}</strong></p>
+                        <p>Confidence: <strong>{{ current_confidence }}%</strong></p>
+                        <p>Detection Time: <strong>{{ detection_time }}s</strong></p>
+                        <p>Last Updated: <strong>{{ last_update }}</strong></p>
                     </div>
                     
-                    <div class="form-group">
-                        <label for="location">Location</label>
-                        <input type="text" id="location" name="location" class="glow-input"
-                               value="{{ current_location }}" placeholder="Enter location">
+                    <div class="info">
+                        <div class="info-title">🔌 ASCOM Connection</div>
+                        <p>Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></p>
+                        {% if connection_duration %}
+                        <p>Duration: <strong>{{ connection_duration }}</strong></p>
+                        {% endif %}
                     </div>
                     
-                    <div class="form-group">
-                        <h2>🛡️ Safety Configuration</h2>
-                        <label>Mark conditions that are UNSAFE for observing</label>
-                        <div class="help-text">Unchecked conditions will be considered SAFE</div>
-                        <div class="checkbox-group">
-                            {% for condition in all_conditions %}
-                            <div class="checkbox-item">
-                                <input type="checkbox" 
-                                       id="unsafe_{{ condition }}" 
-                                       name="unsafe_{{ condition }}"
-                                       {% if condition in unsafe_conditions %}checked{% endif %}>
-                                <label for="unsafe_{{ condition }}">{{ condition }}</label>
-                            </div>
-                            {% endfor %}
+                    <div class="info">
+                        <div class="info-title">⚙️ Current Configuration</div>
+                        <p>Device Name: <strong>{{ current_name }}</strong></p>
+                        <p>Location: <strong>{{ current_location }}</strong></p>
+                        <p>Safe Conditions: <span class="safe-indicator">{{ safe_conditions|join(', ') }}</span></p>
+                        <p>Unsafe Conditions: <span class="unsafe-indicator">{{ unsafe_conditions|join(', ') }}</span></p>
+                    </div>
+                </div>
+                
+                <!-- Right Column: User Input -->
+                <div class="right-column">
+                    <h2 class="column-header"><span class="highlight">Setup</span></h2>
+                    
+                    <form method="POST">
+                        <div class="form-group">
+                            <label for="device_name">Device Name</label>
+                            <input type="text" id="device_name" name="device_name" class="glow-input"
+                                   value="{{ current_name }}" placeholder="Enter device name">
                         </div>
-                    </div>
-                    
-                    <button type="submit">Save Configuration</button>
-                </form>
+                        
+                        <div class="form-group">
+                            <label for="location">Location</label>
+                            <input type="text" id="location" name="location" class="glow-input"
+                                   value="{{ current_location }}" placeholder="Enter location">
+                        </div>
+                        
+                        <div class="form-group">
+                            <h2>🛡️ Safety Configuration</h2>
+                            <label>Mark conditions that are UNSAFE for observing</label>
+                            <div class="help-text">Unchecked conditions will be considered SAFE</div>
+                            <div class="checkbox-group">
+                                {% for condition in all_conditions %}
+                                <div class="checkbox-item">
+                                    <input type="checkbox" 
+                                           id="unsafe_{{ condition }}" 
+                                           name="unsafe_{{ condition }}"
+                                           {% if condition in unsafe_conditions %}checked{% endif %}>
+                                    <label for="unsafe_{{ condition }}">{{ condition }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <button type="submit">Save Configuration</button>
+                    </form>
+                </div>
             </div>
         </div>
     </body>
@@ -1151,26 +1232,23 @@ class AlpacaDiscovery:
 
 
 # Initialize application at module level for gunicorn
-def create_app():
-    """Application factory for gunicorn"""
-    import os
+def main():
+    """Main entry point for Waitress-based unified service"""
+    from waitress import serve
     
     global safety_monitor, discovery_service
     
-    # Load detection configuration
+    # 1. Load Configurations
     detect_config = DetectConfig.from_env()
-    
-    # Try to load Alpaca configuration from file first
     alpaca_config = AlpacaConfig.load_from_file()
     
     if alpaca_config is None:
-        # Create default Alpaca configuration if file doesn't exist
+        # Create default config from environment
         alpaca_config = AlpacaConfig(
             port=int(os.getenv('ALPACA_PORT', '11111')),
             device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
             update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
         )
-        # Save default config
         alpaca_config.save_to_file()
     else:
         # Override port settings from environment if provided
@@ -1178,11 +1256,13 @@ def create_app():
         alpaca_config.device_number = int(os.getenv('ALPACA_DEVICE_NUMBER', str(alpaca_config.device_number)))
         alpaca_config.update_interval = int(os.getenv('ALPACA_UPDATE_INTERVAL', str(alpaca_config.update_interval)))
     
-    # Initialize safety monitor
+    # 2. Initialize global safety monitor
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
     
-    # Initialize and start discovery service
-    # Only start if not already running (prevents duplicate discovery in multi-worker scenarios)
+    # 3. Connect (starts the background detection thread)
+    safety_monitor.connect()
+    
+    # 4. Start Discovery Service
     discovery_service = AlpacaDiscovery(alpaca_config.port)
     discovery_service.start()
     
@@ -1192,27 +1272,30 @@ def create_app():
     logger.info(f"Unsafe conditions: {', '.join(alpaca_config.unsafe_conditions)}")
     logger.info(f"Safe conditions: {', '.join([c for c in ALL_CLOUD_CONDITIONS if c not in alpaca_config.unsafe_conditions])}")
     
-    return app
-
-
-def main():
-    """Main entry point for standalone execution"""
-    import os
+    # 5. Setup signal handlers for graceful shutdown
+    def handle_shutdown_signal(signum, frame):
+        logger.info(f"Received shutdown signal ({signum})")
+        try:
+            discovery_service.stop()
+            safety_monitor.disconnect()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        finally:
+            sys.exit(0)
     
-    # Create and configure app
-    application = create_app()
+    signal.signal(signal.SIGTERM, handle_shutdown_signal)
+    signal.signal(signal.SIGINT, handle_shutdown_signal)
     
-    # Get port from environment
-    port = int(os.getenv('ALPACA_PORT', '11111'))
+    # 6. Run Waitress Server (production-ready, single-process, multi-threaded)
+    logger.info(f"Starting Waitress Server on 0.0.0.0:{alpaca_config.port}")
+    logger.info("Press Ctrl+C to stop the server")
     
-    logger.info(f"Starting ASCOM Alpaca SafetyMonitor on port {port}")
-    
-    # Run Flask development server
-    application.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        serve(app, host='0.0.0.0', port=alpaca_config.port, threads=6)
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+        handle_shutdown_signal(signal.SIGINT, None)
 
 
 if __name__ == '__main__':
     main()
-else:
-    # When imported by gunicorn, initialize the app
-    app = create_app()
