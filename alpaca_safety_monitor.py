@@ -136,6 +136,7 @@ class AlpacaSafetyMonitor:
         self.connected_at: Optional[datetime] = None
         self.disconnected_at: Optional[datetime] = None
         self.last_connected_at: Optional[datetime] = None  # Track last successful connection
+        self.client_ip: Optional[str] = None  # Track connected client's IP address
         
         # Cloud detection state - use single lock for all state
         self.latest_detection: Optional[Dict[str, Any]] = {
@@ -375,7 +376,7 @@ class AlpacaSafetyMonitor:
         
         logger.info("Detection loop stopped")
     
-    def connect(self):
+    def connect(self, client_ip: Optional[str] = None):
         """Connect to the device (ASCOM client connection)"""
         if self.connected:
             return
@@ -385,7 +386,8 @@ class AlpacaSafetyMonitor:
             self.connected = True
             self.connected_at = get_current_time(self.alpaca_config.timezone)
             self.last_connected_at = self.connected_at
-            logger.info("ASCOM client connected to safety monitor")
+            self.client_ip = client_ip
+            logger.info(f"ASCOM client connected to safety monitor from {client_ip or 'unknown'}")
         except Exception as e:
             logger.error(f"Failed to connect: {e}")
             raise
@@ -517,7 +519,11 @@ def set_connected(device_number: int):
 
     try:
         if target_state != safety_monitor.connected:
-            safety_monitor.connect() if target_state else safety_monitor.disconnect()
+            if target_state:
+                client_ip = request.remote_addr
+                safety_monitor.connect(client_ip=client_ip)
+            else:
+                safety_monitor.disconnect()
         
         return jsonify(safety_monitor.create_response(
             client_transaction_id=client_tx_id
@@ -555,7 +561,8 @@ def connect_device(device_number: int):
     _, client_tx_id = safety_monitor.get_client_params()
     try:
         if not safety_monitor.connected:
-            safety_monitor.connect()
+            client_ip = request.remote_addr
+            safety_monitor.connect(client_ip=client_ip)
         return jsonify(safety_monitor.create_response(client_transaction_id=client_tx_id))
     except Exception as e:
         logger.error(f"Failed to connect: {e}")
@@ -1657,6 +1664,11 @@ def setup_device(device_number: int):
                                             Last Connected: <strong style="color: rgb(226, 232, 240);">{{ last_connected }}</strong>
                                         </p>
                                         {% endif %}
+                                        {% if client_ip %}
+                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                            Client: <strong style="color: rgb(226, 232, 240);">{{ client_ip }}</strong>
+                                        </p>
+                                        {% endif %}
                                         {% if last_disconnected %}
                                         <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
                                             Last Disconnected: <strong style="color: rgb(226, 232, 240);">{{ last_disconnected }}</strong>
@@ -2333,25 +2345,46 @@ def setup_device(device_number: int):
         ascom_status_class = 'status-disconnected'
         connection_duration = None
     
-    # Format last connected/disconnected timestamps
+    # Format last connected/disconnected timestamps with current timezone
     last_connected = None
     if safety_monitor.last_connected_at:
-        last_connected = safety_monitor.last_connected_at.strftime('%Y-%m-%d %H:%M:%S')
+        # Convert to current timezone if different
+        try:
+            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+            converted_time = safety_monitor.last_connected_at.astimezone(tz)
+            last_connected = converted_time.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            last_connected = safety_monitor.last_connected_at.strftime('%Y-%m-%d %H:%M:%S')
     
     last_disconnected = None
     if safety_monitor.disconnected_at:
-        last_disconnected = safety_monitor.disconnected_at.strftime('%Y-%m-%d %H:%M:%S')
+        # Convert to current timezone if different
+        try:
+            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+            converted_time = safety_monitor.disconnected_at.astimezone(tz)
+            last_disconnected = converted_time.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            last_disconnected = safety_monitor.disconnected_at.strftime('%Y-%m-%d %H:%M:%S')
     
     # Prepare ASCOM safe/unsafe status display
     ascom_safe_status = 'SAFE' if safety_monitor._stable_safe_state else 'UNSAFE'
     ascom_safe_color = 'rgb(52, 211, 153)' if safety_monitor._stable_safe_state else 'rgb(248, 113, 113)'
     
-    # Format safety history for display (newest first)
+    # Format safety history for display (newest first) with current timezone
     safety_history = []
     for entry in reversed(safety_monitor._safety_history):
+        try:
+            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+            converted_time = entry['timestamp'].astimezone(tz)
+            time_str = converted_time.strftime('%H:%M:%S')
+            date_str = converted_time.strftime('%Y-%m-%d')
+        except Exception:
+            time_str = entry['timestamp'].strftime('%H:%M:%S')
+            date_str = entry['timestamp'].strftime('%Y-%m-%d')
+        
         safety_history.append({
-            'time': entry['timestamp'].strftime('%H:%M:%S'),
-            'date': entry['timestamp'].strftime('%Y-%m-%d'),
+            'time': time_str,
+            'date': date_str,
             'is_safe': entry['is_safe'],
             'status': 'SAFE' if entry['is_safe'] else 'UNSAFE',
             'condition': entry['condition'],
@@ -2380,6 +2413,7 @@ def setup_device(device_number: int):
         ascom_safe_color=ascom_safe_color,
         safety_history=safety_history,
         connection_duration=connection_duration,
+        client_ip=safety_monitor.client_ip,
         last_connected=last_connected,
         last_disconnected=last_disconnected,
         detection_interval=safety_monitor.alpaca_config.detection_interval,
