@@ -883,6 +883,18 @@ def setup_device(device_number: int):
         # Save configuration to file
         safety_monitor.alpaca_config.save_to_file()
         
+        # Trigger immediate detection with new settings
+        logger.info("Triggering immediate detection after config save")
+        try:
+            result = safety_monitor.cloud_detector.detect()
+            result['timestamp'] = get_current_time(safety_monitor.alpaca_config.timezone)
+            with safety_monitor.detection_lock:
+                safety_monitor.latest_detection = result
+                safety_monitor._update_cached_safety(result)
+            logger.info(f"Immediate detection after config save: {result['class_name']} ({result['confidence_score']:.1f}%)")
+        except Exception as e:
+            logger.error(f"Immediate detection after config save failed: {e}")
+        
         # Redirect to prevent form resubmission (Post/Redirect/Get pattern)
         return redirect(url_for('setup_device', device_number=device_number))
     
@@ -1721,6 +1733,44 @@ def setup_device(device_number: int):
                         btn.classList.add('active');
                     }
                 }
+                
+                // Auto-refresh system status
+                function updateSystemStatus() {
+                    fetch(window.location.href)
+                        .then(response => response.text())
+                        .then(html => {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(html, 'text/html');
+                            
+                            // Update Current Detection values
+                            const detectionGrid = document.querySelector('.detection-grid');
+                            const newDetectionGrid = doc.querySelector('.detection-grid');
+                            if (detectionGrid && newDetectionGrid) {
+                                detectionGrid.innerHTML = newDetectionGrid.innerHTML;
+                            }
+                            
+                            // Update Safety History
+                            const safetyHistory = document.querySelector('.status-card:has(.status-card-title:contains("📜 Safety History"))');
+                            const newSafetyHistory = doc.querySelector('.status-card:has(.status-card-title:contains("📜 Safety History"))');
+                            if (safetyHistory && newSafetyHistory) {
+                                const oldScrollTop = safetyHistory.querySelector('div[style*="overflow-y"]')?.scrollTop || 0;
+                                safetyHistory.innerHTML = newSafetyHistory.innerHTML;
+                                const scrollDiv = safetyHistory.querySelector('div[style*="overflow-y"]');
+                                if (scrollDiv) scrollDiv.scrollTop = oldScrollTop;
+                            }
+                            
+                            // Update ASCOM Connection details
+                            const ascomDetails = document.getElementById('ascom-details');
+                            const newAscomDetails = doc.getElementById('ascom-details');
+                            if (ascomDetails && newAscomDetails) {
+                                ascomDetails.innerHTML = newAscomDetails.innerHTML;
+                            }
+                        })
+                        .catch(error => console.error('Error updating status:', error));
+                }
+                
+                // Update every 5 seconds
+                setInterval(updateSystemStatus, 5000);
                 </script>
                 
                 <!-- Configuration Form Section -->
