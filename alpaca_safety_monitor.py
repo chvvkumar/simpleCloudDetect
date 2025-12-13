@@ -16,6 +16,7 @@ import signal
 import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any
 import json
 
@@ -31,6 +32,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Global timezone helper
+def get_current_time(timezone_str: str = 'UTC') -> datetime:
+    """Get current time in specified timezone"""
+    try:
+        tz = ZoneInfo(timezone_str)
+        return datetime.now(tz)
+    except Exception:
+        # Fallback to UTC if timezone is invalid
+        return datetime.now(ZoneInfo('UTC'))
 
 # ASCOM Error Codes
 ERROR_SUCCESS = 0
@@ -66,6 +77,10 @@ class AlpacaConfig:
     # Debounce settings (in seconds)
     debounce_to_safe_sec: int = 60  # Wait time before switching from Unsafe → Safe
     debounce_to_unsafe_sec: int = 0  # Wait time before switching from Safe → Unsafe (immediate)
+    
+    # NTP and timezone settings
+    ntp_server: str = field(default_factory=lambda: os.environ.get('NTP_SERVER', 'pool.ntp.org'))
+    timezone: str = field(default_factory=lambda: os.environ.get('TZ', 'UTC'))
     
     def save_to_file(self, filepath: str = "alpaca_config.json"):
         """Save configuration to JSON file"""
@@ -137,6 +152,9 @@ class AlpacaSafetyMonitor:
         self._pending_safe_state: Optional[bool] = None  # The potential new state we are waiting to verify
         self._state_change_start_time: Optional[datetime] = None  # Timestamp when pending state first appeared
         
+        # Safety state history (last 100 transitions)
+        self._safety_history: list = []  # List of (timestamp, is_safe, condition, confidence) tuples
+        
         self.detection_lock = threading.Lock()
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
@@ -159,7 +177,7 @@ class AlpacaSafetyMonitor:
         logger.info("Performing initial detection (blocking)...")
         try:
             initial_result = self.cloud_detector.detect()
-            initial_result['timestamp'] = datetime.now()
+            initial_result['timestamp'] = get_current_time(self.alpaca_config.timezone)
             with self.detection_lock:
                 self.latest_detection = initial_result
                 self._update_cached_safety(initial_result)
@@ -199,13 +217,13 @@ class AlpacaSafetyMonitor:
             if self._pending_safe_state != is_safe_now:
                 # New change detected - start debounce timer
                 self._pending_safe_state = is_safe_now
-                self._state_change_start_time = datetime.now()
+                self._state_change_start_time = get_current_time(self.alpaca_config.timezone)
                 logger.info(f"State change detected: {'Safe' if is_safe_now else 'Unsafe'} "
                            f"(pending debounce verification)")
             else:
                 # Change persisting - check if debounce period has elapsed
                 if self._state_change_start_time:
-                    elapsed_time = (datetime.now() - self._state_change_start_time).total_seconds()
+                    elapsed_time = (get_current_time(self.alpaca_config.timezone) - self._state_change_start_time).total_seconds()
                     
                     # Determine required duration based on transition direction
                     if is_safe_now:
@@ -221,6 +239,17 @@ class AlpacaSafetyMonitor:
                         self._cached_is_safe = is_safe_now
                         self._pending_safe_state = None
                         self._state_change_start_time = None
+                        
+                        # Add to safety history (keep last 100)
+                        self._safety_history.append({
+                            'timestamp': get_current_time(self.alpaca_config.timezone),
+                            'is_safe': is_safe_now,
+                            'condition': class_name,
+                            'confidence': confidence
+                        })
+                        if len(self._safety_history) > 100:
+                            self._safety_history.pop(0)
+                        
                         logger.warning(f"SAFETY STATE CHANGED: {'SAFE' if is_safe_now else 'UNSAFE'} "
                                      f"(class={class_name}, confidence={confidence:.1f}%, "
                                      f"threshold={threshold:.1f}%, debounce={elapsed_time:.1f}s)")
@@ -316,7 +345,7 @@ class AlpacaSafetyMonitor:
             try:
                 # Perform detection in background without blocking API responses
                 result = self.cloud_detector.detect()
-                result['timestamp'] = datetime.now()
+                result['timestamp'] = get_current_time(self.alpaca_config.timezone)
                 
                 # Update ASCOM state
                 with self.detection_lock:
@@ -354,7 +383,7 @@ class AlpacaSafetyMonitor:
         try:
             # Just mark as connected - detection loop is already running
             self.connected = True
-            self.connected_at = datetime.now()
+            self.connected_at = get_current_time(self.alpaca_config.timezone)
             self.last_connected_at = self.connected_at
             logger.info("ASCOM client connected to safety monitor")
         except Exception as e:
@@ -369,7 +398,7 @@ class AlpacaSafetyMonitor:
         try:
             # Just mark as disconnected - detection loop keeps running for MQTT/web UI
             self.connected = False
-            self.disconnected_at = datetime.now()
+            self.disconnected_at = get_current_time(self.alpaca_config.timezone)
             self.connected_at = None
             logger.info("ASCOM client disconnected from safety monitor")
         except Exception as e:
@@ -734,6 +763,17 @@ def setup_device(device_number: int):
             safety_monitor.alpaca_config.image_url = default_url
             safety_monitor.detect_config.image_url = default_url
             logger.info(f"Image URL reset to environment default: {default_url}")
+        
+        # Handle NTP and timezone settings
+        ntp_server = request.form.get('ntp_server', '').strip()
+        if ntp_server:
+            safety_monitor.alpaca_config.ntp_server = ntp_server
+            logger.info(f"NTP server updated to: {ntp_server}")
+        
+        timezone = request.form.get('timezone', '').strip()
+        if timezone:
+            safety_monitor.alpaca_config.timezone = timezone
+            logger.info(f"Timezone updated to: {timezone}")
         
         # Handle timing configuration with safety validations
         try:
@@ -1541,24 +1581,55 @@ def setup_device(device_number: int):
                     
                     <div class="status-grid">
                         <!-- Current Detection - Prominent -->
-                        <div class="status-card status-card-large">
-                            <div class="status-card-title detection-title">⚡ Current Detection</div>
-                            <div class="detection-grid">
-                                <div class="detection-item">
-                                    <div class="detection-label">Condition</div>
-                                    <div class="detection-value">{{ current_condition }}</div>
+                        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
+                            <!-- Current Detection - Prominent -->
+                            <div class="status-card status-card-large">
+                                <div class="status-card-title detection-title">⚡ Current Detection</div>
+                                <div class="detection-grid">
+                                    <div class="detection-item">
+                                        <div class="detection-label">Condition</div>
+                                        <div class="detection-value">{{ current_condition }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Confidence</div>
+                                        <div class="detection-value">{{ current_confidence }}%</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">ASCOM Status</div>
+                                        <div class="detection-value" style="color: {{ ascom_safe_color }};">{{ ascom_safe_status }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Detection Time</div>
+                                        <div class="detection-value">{{ detection_time }}s</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Last Updated</div>
+                                        <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
+                                    </div>
                                 </div>
-                                <div class="detection-item">
-                                    <div class="detection-label">Confidence</div>
-                                    <div class="detection-value">{{ current_confidence }}%</div>
-                                </div>
-                                <div class="detection-item">
-                                    <div class="detection-label">Detection Time</div>
-                                    <div class="detection-value">{{ detection_time }}s</div>
-                                </div>
-                                <div class="detection-item">
-                                    <div class="detection-label">Last Updated</div>
-                                    <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
+                            </div>
+                            
+                            <!-- Safety State History -->
+                            <div class="status-card">
+                                <div class="status-card-title">📜 Safety History</div>
+                                <div style="max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+                                    {% if safety_history %}
+                                        {% for entry in safety_history %}
+                                        <div style="padding: 4px 8px; border-bottom: 1px solid rgba(71, 85, 105, 0.3); display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="color: {{ 'rgb(52, 211, 153)' if entry.is_safe else 'rgb(248, 113, 113)' }}; font-weight: 600;">
+                                                {{ '✓ SAFE' if entry.is_safe else '⚠ UNSAFE' }}
+                                            </span>
+                                            <span style="color: rgb(148, 163, 184); font-size: 10px;">{{ entry.time }}</span>
+                                        </div>
+                                        <div style="padding: 2px 8px 6px 8px; font-size: 10px; color: rgb(148, 163, 184);">
+                                            {{ entry.condition }} ({{ entry.confidence }}%)
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div style="padding: 12px; text-align: center; color: rgb(148, 163, 184); font-size: 12px;">
+                                            No state changes yet
+                                        </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
@@ -1755,6 +1826,27 @@ def setup_device(device_number: int):
                                                                value="{{ current_image_url }}" placeholder="{{ image_url_default }}">
                                                         <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
                                                             URL to fetch images for cloud detection. Leave empty to use environment variable default.
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="ntp_server">NTP Server</label>
+                                                        <input type="text" id="ntp_server" name="ntp_server" class="glow-input"
+                                                               value="{{ current_ntp_server }}" placeholder="pool.ntp.org">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Time server for accurate timestamps
+                                                        </small>
+                                                    </div>
+                                                    
+                                                    <div class="form-group">
+                                                        <label for="timezone">Timezone</label>
+                                                        <input type="text" id="timezone" name="timezone" class="glow-input"
+                                                               value="{{ current_timezone }}" placeholder="UTC">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            e.g., America/New_York, Europe/London, UTC
+                                                            <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" style="color: rgb(6, 182, 212); text-decoration: none; margin-left: 8px;">📖 Reference</a>
                                                         </small>
                                                     </div>
                                                 </div>
@@ -2225,7 +2317,7 @@ def setup_device(device_number: int):
         
         # Calculate connection duration
         if safety_monitor.connected_at:
-            duration = datetime.now() - safety_monitor.connected_at
+            duration = get_current_time(safety_monitor.alpaca_config.timezone) - safety_monitor.connected_at
             hours, remainder = divmod(int(duration.total_seconds()), 3600)
             minutes, seconds = divmod(remainder, 60)
             if hours > 0:
@@ -2250,12 +2342,30 @@ def setup_device(device_number: int):
     if safety_monitor.disconnected_at:
         last_disconnected = safety_monitor.disconnected_at.strftime('%Y-%m-%d %H:%M:%S')
     
+    # Prepare ASCOM safe/unsafe status display
+    ascom_safe_status = 'SAFE' if safety_monitor._stable_safe_state else 'UNSAFE'
+    ascom_safe_color = 'rgb(52, 211, 153)' if safety_monitor._stable_safe_state else 'rgb(248, 113, 113)'
+    
+    # Format safety history for display (newest first)
+    safety_history = []
+    for entry in reversed(safety_monitor._safety_history):
+        safety_history.append({
+            'time': entry['timestamp'].strftime('%H:%M:%S'),
+            'date': entry['timestamp'].strftime('%Y-%m-%d'),
+            'is_safe': entry['is_safe'],
+            'status': 'SAFE' if entry['is_safe'] else 'UNSAFE',
+            'condition': entry['condition'],
+            'confidence': f"{entry['confidence']:.1f}"
+        })
+    
     return render_template_string(
         html_template,
         message=message,
         current_name=safety_monitor.alpaca_config.device_name,
         current_location=safety_monitor.alpaca_config.location,
         current_image_url=safety_monitor.alpaca_config.image_url,
+        current_ntp_server=safety_monitor.alpaca_config.ntp_server,
+        current_timezone=safety_monitor.alpaca_config.timezone,
         image_url_default=os.environ.get('IMAGE_URL', 'Not set in environment'),
         all_conditions=all_available_conditions,
         unsafe_conditions=unsafe_conditions,
@@ -2266,6 +2376,9 @@ def setup_device(device_number: int):
         last_update=last_update,
         ascom_status=ascom_status,
         ascom_status_class=ascom_status_class,
+        ascom_safe_status=ascom_safe_status,
+        ascom_safe_color=ascom_safe_color,
+        safety_history=safety_history,
         connection_duration=connection_duration,
         last_connected=last_connected,
         last_disconnected=last_disconnected,
