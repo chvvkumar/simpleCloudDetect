@@ -1742,28 +1742,55 @@ def setup_device(device_number: int):
                             const parser = new DOMParser();
                             const doc = parser.parseFromString(html, 'text/html');
                             
-                            // Update Current Detection values
+                            // Update Current Detection - all fields including Detection Time and Last Updated
                             const detectionGrid = document.querySelector('.detection-grid');
                             const newDetectionGrid = doc.querySelector('.detection-grid');
                             if (detectionGrid && newDetectionGrid) {
                                 detectionGrid.innerHTML = newDetectionGrid.innerHTML;
                             }
                             
-                            // Update Safety History
-                            const safetyHistory = document.querySelector('.status-card:has(.status-card-title:contains("📜 Safety History"))');
-                            const newSafetyHistory = doc.querySelector('.status-card:has(.status-card-title:contains("📜 Safety History"))');
-                            if (safetyHistory && newSafetyHistory) {
-                                const oldScrollTop = safetyHistory.querySelector('div[style*="overflow-y"]')?.scrollTop || 0;
-                                safetyHistory.innerHTML = newSafetyHistory.innerHTML;
-                                const scrollDiv = safetyHistory.querySelector('div[style*="overflow-y"]');
-                                if (scrollDiv) scrollDiv.scrollTop = oldScrollTop;
-                            }
+                            // Update Safety History - find by looking for the title text
+                            const statusCards = document.querySelectorAll('.status-card');
+                            const newStatusCards = doc.querySelectorAll('.status-card');
                             
-                            // Update ASCOM Connection details
+                            statusCards.forEach((card, index) => {
+                                const title = card.querySelector('.status-card-title');
+                                if (title && title.textContent.includes('📜 Safety History')) {
+                                    const scrollableDiv = card.querySelector('div[style*="overflow-y"]');
+                                    const oldScrollTop = scrollableDiv ? scrollableDiv.scrollTop : 0;
+                                    
+                                    const newCard = newStatusCards[index];
+                                    if (newCard) {
+                                        card.innerHTML = newCard.innerHTML;
+                                        const newScrollableDiv = card.querySelector('div[style*="overflow-y"]');
+                                        if (newScrollableDiv) {
+                                            newScrollableDiv.scrollTop = oldScrollTop;
+                                        }
+                                    }
+                                }
+                            });
+                            
+                            // Update ASCOM Connection details including Duration
                             const ascomDetails = document.getElementById('ascom-details');
                             const newAscomDetails = doc.getElementById('ascom-details');
                             if (ascomDetails && newAscomDetails) {
+                                const wasOpen = ascomDetails.classList.contains('open');
                                 ascomDetails.innerHTML = newAscomDetails.innerHTML;
+                                if (wasOpen) {
+                                    ascomDetails.classList.add('open');
+                                }
+                            }
+                            
+                            // Update ASCOM Connection button status text
+                            const ascomButton = document.querySelector('button[onclick*="ascom-details"]');
+                            const newAscomButton = doc.querySelector('button[onclick*="ascom-details"]');
+                            if (ascomButton && newAscomButton) {
+                                const statusSpan = ascomButton.querySelector('span[class*="status-"]');
+                                const newStatusSpan = newAscomButton.querySelector('span[class*="status-"]');
+                                if (statusSpan && newStatusSpan) {
+                                    statusSpan.className = newStatusSpan.className;
+                                    statusSpan.textContent = newStatusSpan.textContent;
+                                }
                             }
                         })
                         .catch(error => console.error('Error updating status:', error));
