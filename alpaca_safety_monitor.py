@@ -53,6 +53,7 @@ class AlpacaConfig:
     driver_info: str = "ASCOM Alpaca SafetyMonitor v2.0 - Cloud Detection Driver"
     driver_version: str = "2.0"
     interface_version: int = 3  # Changed from 1 to 3
+    detection_interval: int = 30  # seconds between ML detections (from detect.py)
     update_interval: int = 30  # seconds between cloud detection updates
     location: str = "AllSky Camera"
     unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
@@ -92,6 +93,8 @@ class AlpacaConfig:
                     config_dict['debounce_to_safe_sec'] = 60
                 if 'debounce_to_unsafe_sec' not in config_dict:
                     config_dict['debounce_to_unsafe_sec'] = 0
+                if 'detection_interval' not in config_dict:
+                    config_dict['detection_interval'] = 30
                 
                 logger.info(f"Configuration loaded from {filepath}")
                 return cls(**config_dict)
@@ -720,27 +723,63 @@ def setup_device(device_number: int):
             safety_monitor.alpaca_config.location = location
             logger.info(f"Location updated to: {location}")
         
-        # Handle debounce timers
+        # Handle timing configuration with safety validations
+        try:
+            detection_interval = request.form.get('detection_interval', '').strip()
+            if detection_interval:
+                val = int(detection_interval)
+                if 5 <= val <= 300:
+                    safety_monitor.alpaca_config.detection_interval = val
+                    # Update the detect_config as well
+                    safety_monitor.detect_config.detect_interval = val
+                    logger.info(f"Detection interval updated to: {val}s")
+                else:
+                    logger.warning(f"Detection interval {val}s out of range (5-300s)")
+        except ValueError:
+            logger.warning(f"Invalid detection_interval value: {detection_interval}")
+        
+        try:
+            update_interval = request.form.get('update_interval', '').strip()
+            if update_interval:
+                val = int(update_interval)
+                if 5 <= val <= 300:
+                    safety_monitor.alpaca_config.update_interval = val
+                    logger.info(f"ASCOM update interval updated to: {val}s")
+                else:
+                    logger.warning(f"Update interval {val}s out of range (5-300s)")
+        except ValueError:
+            logger.warning(f"Invalid update_interval value: {update_interval}")
+        
+        # Handle debounce timers with safety validations
         try:
             debounce_safe = request.form.get('debounce_safe', '').strip()
             if debounce_safe:
-                safety_monitor.alpaca_config.debounce_to_safe_sec = int(debounce_safe)
-                logger.info(f"Debounce to safe updated to: {debounce_safe}s")
+                val = int(debounce_safe)
+                # Validation: Safe debounce should be >= detection_interval for smooth operation
+                if val > 0 and val < safety_monitor.alpaca_config.detection_interval:
+                    logger.warning(f"Safe wait time {val}s < detection interval {safety_monitor.alpaca_config.detection_interval}s - may cause erratic behavior")
+                safety_monitor.alpaca_config.debounce_to_safe_sec = val
+                logger.info(f"Debounce to safe updated to: {val}s")
         except ValueError:
             logger.warning(f"Invalid debounce_safe value: {debounce_safe}")
         
         try:
             debounce_unsafe = request.form.get('debounce_unsafe', '').strip()
             if debounce_unsafe:
-                safety_monitor.alpaca_config.debounce_to_unsafe_sec = int(debounce_unsafe)
-                logger.info(f"Debounce to unsafe updated to: {debounce_unsafe}s")
+                val = int(debounce_unsafe)
+                # Safety validation: Warn if unsafe debounce > 30s (delays emergency response)
+                if val > 30:
+                    logger.warning(f"Unsafe wait time {val}s > 30s - delays emergency response to dangerous conditions")
+                safety_monitor.alpaca_config.debounce_to_unsafe_sec = val
+                logger.info(f"Debounce to unsafe updated to: {val}s")
         except ValueError:
             logger.warning(f"Invalid debounce_unsafe value: {debounce_unsafe}")
         
-        # Handle unsafe conditions checkboxes
+        # Handle unsafe conditions from radio buttons
         unsafe_conditions = []
         for condition in all_available_conditions:
-            if request.form.get(f'unsafe_{condition}'):
+            safety_choice = request.form.get(f'safety_{condition}')
+            if safety_choice == 'unsafe':
                 unsafe_conditions.append(condition)
         
         safety_monitor.alpaca_config.unsafe_conditions = unsafe_conditions
@@ -1059,6 +1098,10 @@ def setup_device(device_number: int):
                 .input-row {
                     grid-template-columns: 1fr;
                 }
+                
+                .input-group > div[style*="grid-template-columns: 1fr 1fr"] {
+                    grid-template-columns: 1fr !important;
+                }
             }
             
             @media (max-width: 1200px) {
@@ -1163,6 +1206,75 @@ def setup_device(device_number: int):
                 font-size: 14px;
                 text-transform: none;
                 letter-spacing: 0;
+            }
+            
+            /* Safety Configuration Boxes */
+            .safety-box {
+                background: rgba(10, 15, 24, 0.9);
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                overflow: hidden;
+            }
+            
+            .safety-box-header {
+                padding: 16px;
+                font-weight: 600;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                border-bottom: 2px solid;
+            }
+            
+            .safe-box {
+                border-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .safe-header {
+                background: rgba(52, 211, 153, 0.1);
+                color: rgb(52, 211, 153);
+                border-bottom-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .unsafe-box {
+                border-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            .unsafe-header {
+                background: rgba(248, 113, 113, 0.1);
+                color: rgb(248, 113, 113);
+                border-bottom-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            .safety-box-content {
+                padding: 16px;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            
+            .condition-item {
+                padding: 12px;
+                margin-bottom: 12px;
+                background: rgba(15, 23, 42, 0.6);
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                transition: all 0.3s ease;
+            }
+            
+            .condition-item:last-child {
+                margin-bottom: 0;
+            }
+            
+            .safe-condition:hover {
+                background: rgba(52, 211, 153, 0.05);
+                border-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .unsafe-condition:hover {
+                background: rgba(248, 113, 113, 0.05);
+                border-color: rgba(248, 113, 113, 0.3);
             }
             
             button {
@@ -1363,57 +1475,341 @@ def setup_device(device_number: int):
                                     </div>
                                 </div>
                                 
-                                <!-- Debounce Timers -->
+                                <!-- Timing Configuration -->
                                 <div class="input-group">
-                                    <h2>⏱️ Debounce Timers (seconds)</h2>
+                                    <h2>Timing Configuration</h2>
+                                    
+                                    <!-- How It Works Visualization -->
+                                    <div style="margin-bottom: 24px; padding: 20px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgb(51, 65, 85); border-radius: 8px;">
+                                        <h3 style="color: rgb(226, 232, 240); font-size: 14px; font-weight: 600; margin-bottom: 16px;">How Timing Works</h3>
+                                        
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                                            <!-- Fetch Image Card -->
+                                            <div style="background: rgba(59, 130, 246, 0.1); border: 2px solid rgba(59, 130, 246, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(59, 130, 246); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">📷</div>
+                                                    <div>
+                                                        <div style="color: rgb(59, 130, 246); font-weight: 600; font-size: 13px;">FETCH IMAGE</div>
+                                                        <div id="fetch-display" style="color: rgb(148, 163, 184); font-size: 11px;">Every 60s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Downloads latest image from AllSky camera and runs AI analysis to detect weather conditions
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- ASCOM Update Card -->
+                                            <div style="background: rgba(236, 72, 153, 0.1); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(236, 72, 153); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">🔄</div>
+                                                    <div>
+                                                        <div style="color: rgb(236, 72, 153); font-weight: 600; font-size: 13px;">ASCOM UPDATE</div>
+                                                        <div id="ascom-display" style="color: rgb(148, 163, 184); font-size: 11px;">Every 30s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Re-checks safety status using latest detection result and applies debounce logic
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Safe Debounce Card -->
+                                            <div style="background: rgba(52, 211, 153, 0.1); border: 2px solid rgba(52, 211, 153, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(52, 211, 153); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">✓</div>
+                                                    <div>
+                                                        <div style="color: rgb(52, 211, 153); font-weight: 600; font-size: 13px;">SAFE WAIT TIME</div>
+                                                        <div id="safe-display" style="color: rgb(148, 163, 184); font-size: 11px;">60s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    How long sky must <strong>stay clear</strong> before reporting "Safe" - prevents premature roof opening
+                                                </div>
+                                                <div id="safe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(52, 211, 153, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
+                                            
+                                            <!-- Unsafe Debounce Card -->
+                                            <div style="background: rgba(248, 113, 113, 0.1); border: 2px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(248, 113, 113); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">⚡</div>
+                                                    <div>
+                                                        <div style="color: rgb(248, 113, 113); font-weight: 600; font-size: 13px;">UNSAFE WAIT TIME</div>
+                                                        <div id="unsafe-display" style="color: rgb(148, 163, 184); font-size: 11px;">Immediate</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    How long bad weather must persist before reporting "Unsafe" - 0 = instant roof closure
+                                                </div>
+                                                <div id="unsafe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(248, 113, 113, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Example Scenario -->
+                                        <div id="scenario-example" style="margin-top: 20px; padding: 16px; background: rgba(30, 41, 59, 0.6); border-radius: 8px; border-left: 4px solid rgb(251, 191, 36);">
+                                            <div style="color: rgb(251, 191, 36); font-weight: 600; font-size: 12px; margin-bottom: 8px;">💡 EXAMPLE SCENARIO</div>
+                                            <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.6;"></div>
+                                        </div>
+                                    </div>
+                                    
                                     <div class="input-row">
                                         <div class="form-group">
-                                            <label for="debounce_safe" style="color: rgb(52, 211, 153);">Safe Wait Time</label>
-                                            <input type="number" id="debounce_safe" name="debounce_safe" class="glow-input"
-                                                   value="{{ debounce_to_safe }}" min="0" max="3600" step="1" placeholder="60">
+                                            <label for="detection_interval">Image Fetch Interval (seconds)</label>
+                                            <input type="number" id="detection_interval" name="detection_interval" 
+                                                   value="{{ detection_interval }}" min="5" max="300" step="1" placeholder="30"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">How often to fetch & analyze new images from AllSky camera</p>
                                         </div>
                                         
                                         <div class="form-group">
-                                            <label for="debounce_unsafe" style="color: rgb(248, 113, 113);">Unsafe Wait Time</label>
-                                            <input type="number" id="debounce_unsafe" name="debounce_unsafe" class="glow-input"
-                                                   value="{{ debounce_to_unsafe }}" min="0" max="3600" step="1" placeholder="0">
+                                            <label for="update_interval">ASCOM Update Interval (seconds)</label>
+                                            <input type="number" id="update_interval" name="update_interval" 
+                                                   value="{{ update_interval }}" min="5" max="300" step="1" placeholder="30"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">How often to check safety status</p>
                                         </div>
                                     </div>
+                                    
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="debounce_safe" style="color: rgb(52, 211, 153);">Safe Wait Time (seconds)</label>
+                                            <input type="number" id="debounce_safe" name="debounce_safe" 
+                                                   value="{{ debounce_to_safe }}" min="0" max="3600" step="1" placeholder="60"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Delay before reporting safe conditions</p>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="debounce_unsafe" style="color: rgb(248, 113, 113);">Unsafe Wait Time (seconds)</label>
+                                            <input type="number" id="debounce_unsafe" name="debounce_unsafe" 
+                                                   value="{{ debounce_to_unsafe }}" min="0" max="3600" step="1" placeholder="0"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Delay before reporting unsafe conditions (0 = immediate)</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <script>
+                                    function updateTimingVisualization() {
+                                        const detectionInterval = parseInt(document.getElementById('detection_interval').value) || 30;
+                                        const updateInterval = parseInt(document.getElementById('update_interval').value) || 30;
+                                        const debounceSafe = parseInt(document.getElementById('debounce_safe').value) || 60;
+                                        const debounceUnsafe = parseInt(document.getElementById('debounce_unsafe').value) || 0;
+                                        
+                                        // Update displays
+                                        document.getElementById('fetch-display').textContent = `Every ${detectionInterval}s`;
+                                        document.getElementById('ascom-display').textContent = `Every ${updateInterval}s`;
+                                        document.getElementById('safe-display').textContent = debounceSafe > 0 ? `${debounceSafe}s` : 'None';
+                                        document.getElementById('unsafe-display').textContent = debounceUnsafe > 0 ? `${debounceUnsafe}s` : 'Immediate';
+                                        
+                                        // Calculate coverage info
+                                        if (debounceSafe > 0) {
+                                            const checksNeeded = Math.ceil(debounceSafe / detectionInterval);
+                                            document.getElementById('safe-coverage').innerHTML = 
+                                                `<strong>Requires ${checksNeeded} consecutive clear detections</strong> (${checksNeeded} × ${detectionInterval}s = ${checksNeeded * detectionInterval}s)`;
+                                        } else {
+                                            document.getElementById('safe-coverage').textContent = 'Reports safe immediately after first clear detection';
+                                        }
+                                        
+                                        if (debounceUnsafe > 0) {
+                                            const checksNeeded = Math.ceil(debounceUnsafe / detectionInterval);
+                                            document.getElementById('unsafe-coverage').innerHTML = 
+                                                `<strong>Requires ${checksNeeded} consecutive bad detections</strong> (${checksNeeded} × ${detectionInterval}s = ${checksNeeded * detectionInterval}s)`;
+                                        } else {
+                                            document.getElementById('unsafe-coverage').textContent = 'Reports unsafe immediately - closes roof on first bad detection';
+                                        }
+                                        
+                                        // Generate example scenario
+                                        const scenarioDiv = document.querySelector('#scenario-example > div:last-child');
+                                        let scenario = '';
+                                        
+                                        if (updateInterval < detectionInterval) {
+                                            scenario = `⚠️ <strong>Warning:</strong> ASCOM checks every ${updateInterval}s but new data only arrives every ${detectionInterval}s. You'll check the same result ${Math.floor(detectionInterval/updateInterval)} times before getting new data.`;
+                                        } else {
+                                            // Safe scenario
+                                            let safeScenario = '';
+                                            if (debounceSafe > 0) {
+                                                const checksNeeded = Math.ceil(debounceSafe / detectionInterval);
+                                                safeScenario = `Clouds clear at 00:00 → AI detects "Clear" every ${detectionInterval}s → After ${checksNeeded} detections (${checksNeeded * detectionInterval}s total) → Reports <strong style="color: rgb(52, 211, 153);">SAFE</strong> at ${formatTime(checksNeeded * detectionInterval)}`;
+                                            } else {
+                                                safeScenario = `Clouds clear at 00:00 → AI detects "Clear" at ${formatTime(detectionInterval)} → Immediately reports <strong style="color: rgb(52, 211, 153);">SAFE</strong>`;
+                                            }
+                                            
+                                            // Unsafe scenario
+                                            let unsafeScenario = '';
+                                            if (debounceUnsafe > 0) {
+                                                const checksNeeded = Math.ceil(debounceUnsafe / detectionInterval);
+                                                unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" every ${detectionInterval}s → After ${checksNeeded} detections (${checksNeeded * detectionInterval}s total) → Reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> at ${formatTime(checksNeeded * detectionInterval)}`;
+                                            } else {
+                                                unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" at ${formatTime(detectionInterval)} → ⚡ Immediately reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> (roof closes!)`;
+                                            }
+                                            
+                                            scenario = safeScenario + unsafeScenario;
+                                        }
+                                        
+                                        scenarioDiv.innerHTML = scenario;
+                                    }
+                                    
+                                    function formatTime(seconds) {
+                                        const mins = Math.floor(seconds / 60);
+                                        const secs = seconds % 60;
+                                        return mins > 0 ? `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `00:${String(secs).padStart(2, '0')}`;
+                                    }
+                                    </script>
+                                    
+                                    <script>
+                                    // Validate timing configuration for safety
+                                    function validateTiming() {
+                                        // Update timing visualization
+                                        updateTimingVisualization();
+                                    }
+                                    
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const timingInputs = ['detection_interval', 'update_interval', 'debounce_safe', 'debounce_unsafe'];
+                                        timingInputs.forEach(id => {
+                                            const input = document.getElementById(id);
+                                            if (input) {
+                                                input.addEventListener('input', validateTiming);
+                                                input.addEventListener('change', validateTiming);
+                                            }
+                                        });
+                                        validateTiming();
+                                    });
+                                    </script>
                                 </div>
                                 
                                 <!-- Safety Configuration -->
                                 <div class="input-group">
-                                    <h2>🛡️ Safety Configuration</h2>
-                                    <div class="checkbox-group">
-                                        {% for condition in all_conditions %}
-                                        <div class="checkbox-item" style="flex-direction: column; align-items: flex-start; padding: 14px;">
-                                            <div style="display: flex; align-items: center; width: 100%; margin-bottom: 8px;">
-                                                <input type="checkbox" 
-                                                       id="unsafe_{{ condition }}" 
-                                                       name="unsafe_{{ condition }}"
-                                                       {% if condition in unsafe_conditions %}checked{% endif %}
-                                                       style="margin-right: 10px;">
-                                                <label for="unsafe_{{ condition }}" style="margin: 0; flex: 1;">{{ condition }}</label>
+                                    <h2>Safety Classification</h2>
+                                    <p class="help-text" style="margin-bottom: 16px;">
+                                        Mark each weather condition as <strong style="color: rgb(52, 211, 153);">Safe</strong> or <strong style="color: rgb(248, 113, 113);">Unsafe</strong> for observatory operations.
+                                    </p>
+                                    
+                                    <!-- Safe Conditions -->
+                                    <div id="safe-section" style="margin-bottom: 20px;">
+                                        <h3 style="color: rgb(52, 211, 153); font-size: 14px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Safe Conditions</h3>
+                                        <div id="safe-conditions" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 12px;">
+                                            {% for condition in safe_conditions %}
+                                            <div class="condition-card" data-condition="{{ condition }}" data-safety="safe" style="padding: 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; color: rgb(226, 232, 240); font-size: 14px;">{{ condition }}</div>
+                                                    <div style="display: flex; gap: 16px;">
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="safe" checked 
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(52, 211, 153); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(52, 211, 153); font-weight: 500; font-size: 13px;">Safe</span>
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="unsafe"
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(248, 113, 113); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(248, 113, 113); font-weight: 500; font-size: 13px;">Unsafe</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 110px;">Confidence:</label>
+                                                    <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
+                                                           value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
+                                                           style="width: 70px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184);">%</span>
+                                                </div>
                                             </div>
-                                            <div style="width: 100%; display: flex; align-items: center; gap: 8px;">
-                                                <label for="threshold_{{ condition }}" 
-                                                       style="margin: 0; font-size: 11px; color: rgb(100, 116, 139); min-width: 65px;">
-                                                    Threshold:
-                                                </label>
-                                                <input type="number" 
-                                                       id="threshold_{{ condition }}" 
-                                                       name="threshold_{{ condition }}"
-                                                       value="{{ class_thresholds.get(condition, default_threshold) }}"
-                                                       min="0" max="100" step="1"
-                                                       placeholder="{{ default_threshold }}"
-                                                       style="flex: 1; padding: 6px 10px; background: rgba(10, 15, 24, 0.9); 
-                                                              border: 1px solid rgb(71, 85, 105); border-radius: 4px; 
-                                                              color: rgb(241, 245, 249); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                                <span style="font-size: 11px; color: rgb(100, 116, 139); min-width: 20px;">%</span>
-                                            </div>
+                                            {% endfor %}
                                         </div>
-                                        {% endfor %}
                                     </div>
+                                    
+                                    <!-- Unsafe Conditions -->
+                                    <div id="unsafe-section">
+                                        <h3 style="color: rgb(248, 113, 113); font-size: 14px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Unsafe Conditions</h3>
+                                        <div id="unsafe-conditions" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px; padding: 12px;">
+                                            {% for condition in unsafe_conditions %}
+                                            <div class="condition-card" data-condition="{{ condition }}" data-safety="unsafe" style="padding: 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; color: rgb(226, 232, 240); font-size: 14px;">{{ condition }}</div>
+                                                    <div style="display: flex; gap: 16px;">
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="safe"
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(52, 211, 153); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(52, 211, 153); font-weight: 500; font-size: 13px;">Safe</span>
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="unsafe" checked
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(248, 113, 113); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(248, 113, 113); font-weight: 500; font-size: 13px;">Unsafe</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 110px;">Confidence:</label>
+                                                    <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
+                                                           value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
+                                                           style="width: 70px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184);">%</span>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    
+                                    <script>
+                                    // Dynamic sorting when radio buttons change
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const radios = document.querySelectorAll('.safety-radio');
+                                        const safeContainer = document.getElementById('safe-conditions');
+                                        const unsafeContainer = document.getElementById('unsafe-conditions');
+                                        
+                                        radios.forEach(radio => {
+                                            radio.addEventListener('change', function() {
+                                                const condition = this.dataset.condition;
+                                                const newSafety = this.value;
+                                                const card = document.querySelector(`.condition-card[data-condition="${condition}"]`);
+                                                
+                                                if (card) {
+                                                    // Update card data attribute
+                                                    card.dataset.safety = newSafety;
+                                                    
+                                                    // Move card to appropriate section
+                                                    if (newSafety === 'safe') {
+                                                        safeContainer.appendChild(card);
+                                                    } else {
+                                                        unsafeContainer.appendChild(card);
+                                                    }
+                                                    
+                                                    // Add subtle animation
+                                                    card.style.animation = 'none';
+                                                    setTimeout(() => {
+                                                        card.style.animation = 'slideIn 0.3s ease';
+                                                    }, 10);
+                                                }
+                                            });
+                                        });
+                                    });
+                                    </script>
+                                    <style>
+                                    @keyframes slideIn {
+                                        from {
+                                            opacity: 0;
+                                            transform: translateX(-10px);
+                                        }
+                                        to {
+                                            opacity: 1;
+                                            transform: translateX(0);
+                                        }
+                                    }
+                                    </style>
                                 </div>
                                 
                                 <button type="submit">💾 Save Configuration</button>
@@ -1422,10 +1818,33 @@ def setup_device(device_number: int):
                         
                         <!-- Parameter Guide Sidebar -->
                         <div class="param-guide" style="position: sticky; top: 20px;">
-                            <div class="param-guide-title">📖 Parameter Guide</div>
+                            <div class="param-guide-title">Parameter Guide</div>
+                            
+                            <div class="param-item" style="border-color: rgb(59, 130, 246);">
+                                <strong style="color: rgb(59, 130, 246);">Image Fetch Interval</strong>
+                                <span>How often to download new images from AllSky camera and run AI analysis. Lower values = faster response but higher CPU usage.</span>
+                            </div>
+                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(59, 130, 246, 0.05); border-radius: 4px;">
+                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                    <strong style="color: rgb(59, 130, 246); font-size: 12px;">Recommended:</strong><br>
+                                    • Fast response: 15-30s<br>
+                                    • Balanced: 30-60s<br>
+                                    • Resource efficient: 60-120s
+                                </div>
+                            </div>
+                            
+                            <div class="param-item" style="border-color: rgb(236, 72, 153);">
+                                <strong style="color: rgb(236, 72, 153);">ASCOM Update Interval</strong>
+                                <span>How often to re-check safety status. Should be ≥ Image Fetch Interval.</span>
+                            </div>
+                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(236, 72, 153, 0.05); border-radius: 4px;">
+                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                    <strong style="color: rgb(236, 72, 153); font-size: 12px;">Rule:</strong> Set equal to Image Fetch Interval for efficiency.
+                                </div>
+                            </div>
                             
                             <div class="param-item safe">
-                                <strong>Safe Wait Time (Debounce to Safe)</strong>
+                                <strong>Safe Wait Time</strong>
                                 <span>How long the sky must remain clear before the system reports "Safe".</span>
                             </div>
                             <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(52, 211, 153, 0.05); border-radius: 4px;">
@@ -1536,6 +1955,8 @@ def setup_device(device_number: int):
         ascom_status=ascom_status,
         ascom_status_class=ascom_status_class,
         connection_duration=connection_duration,
+        detection_interval=safety_monitor.alpaca_config.detection_interval,
+        update_interval=safety_monitor.alpaca_config.update_interval,
         debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
         debounce_to_unsafe=safety_monitor.alpaca_config.debounce_to_unsafe_sec,
         default_threshold=safety_monitor.alpaca_config.default_threshold,
@@ -1634,14 +2055,19 @@ def main():
         alpaca_config = AlpacaConfig(
             port=int(os.getenv('ALPACA_PORT', '11111')),
             device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
+            detection_interval=int(os.getenv('DETECT_INTERVAL', '30')),
             update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
         )
         alpaca_config.save_to_file()
     else:
-        # Override port settings from environment if provided
+        # Override settings from environment if provided
         alpaca_config.port = int(os.getenv('ALPACA_PORT', str(alpaca_config.port)))
         alpaca_config.device_number = int(os.getenv('ALPACA_DEVICE_NUMBER', str(alpaca_config.device_number)))
+        alpaca_config.detection_interval = int(os.getenv('DETECT_INTERVAL', str(alpaca_config.detection_interval)))
         alpaca_config.update_interval = int(os.getenv('ALPACA_UPDATE_INTERVAL', str(alpaca_config.update_interval)))
+    
+    # Sync detect_config interval with alpaca_config
+    detect_config.detect_interval = alpaca_config.detection_interval
     
     # 2. Initialize global safety monitor
     safety_monitor = AlpacaSafetyMonitor(alpaca_config, detect_config)
