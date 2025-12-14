@@ -42,6 +42,8 @@ jobs:
             ${{ runner.os }}-pip-
       
       - name: Cache Docker layers
+        # Skip GitHub Actions cache for self-hosted runners (files persist locally)
+        if: ${{ runner.name != 'git01' }}
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
@@ -61,6 +63,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
       
       - name: Move cache
+        if: always()
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache

@@ -1,0 +1,313 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - "main"
+      - "dev"
+    paths-ignore:
+      - '*.md'
+      - 'images/**'
+
+jobs:
+  build:
+    runs-on: self-hosted
+    outputs:
+      should_release: ${{ steps.check_release.outputs.should_release }}
+      tag: ${{ steps.version.outputs.tag }}
+      branch: ${{ steps.version.outputs.branch }}
+      release_type: ${{ steps.version.outputs.release_type }}
+      docker_tag: ${{ steps.docker_tags.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Cache pip packages
+        # Skip cache for self-hosted runners (files persist locally)
+        if: ${{ runner.name != 'git01' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            /root/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Determine Docker tags and cache
+        id: docker_tags
+        run: |
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          
+          if [ "$BRANCH_NAME" = "main" ]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "cache_key=${{ runner.os }}-buildx-main-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "cache_restore=${{ runner.os }}-buildx-main-" >> $GITHUB_OUTPUT
+          else
+            echo "tag=dev" >> $GITHUB_OUTPUT
+            echo "cache_key=${{ runner.os }}-buildx-dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "cache_restore=${{ runner.os }}-buildx-dev-" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Cache Docker layers
+        # Skip GitHub Actions cache for self-hosted runners (files persist locally)
+        if: ${{ runner.name != 'git01' }}
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ steps.docker_tags.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.docker_tags.outputs.cache_restore }}
+            ${{ runner.os }}-buildx-
+      
+      - name: Determine if release should be created
+        id: check_release
+        run: |
+          # Create release on push to main or dev branch
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+            if [ "$BRANCH_NAME" = "main" ]; then
+              echo "📦 Release will be created (push to main)"
+            else
+              echo "📦 Test release will be created (push to $BRANCH_NAME)"
+            fi
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "🔨 Build only (no release)"
+          fi
+      
+      - name: Get version tag for release
+        id: version
+        if: steps.check_release.outputs.should_release == 'true'
+        run: |
+          # Fetch all tags to ensure we have complete tag history
+          git fetch --tags --force
+          
+          # Determine branch-specific tag prefix
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "Branch: $BRANCH_NAME"
+          
+          if [ "$BRANCH_NAME" = "main" ]; then
+            TAG_PREFIX="v"
+            TAG_PATTERN="v[0-9]*.[0-9]*"
+            RELEASE_TYPE="stable"
+          else
+            TAG_PREFIX="v-${BRANCH_NAME}-"
+            TAG_PATTERN="v-${BRANCH_NAME}-[0-9]*.[0-9]*"
+            RELEASE_TYPE="test"
+          fi
+          
+          # Get all matching tags and find the highest version
+          echo "Looking for tags matching pattern: ${TAG_PATTERN}"
+          LATEST_TAG=$(git tag -l "${TAG_PATTERN}" | sort -V | tail -n1)
+          
+          if [ -z "$LATEST_TAG" ]; then
+            # No existing tags, start at 0.1
+            MAJOR=0
+            MINOR=0
+            echo "No existing tags found, starting at ${TAG_PREFIX}0.1"
+          else
+            echo "Latest tag: $LATEST_TAG"
+            # Extract version numbers (remove prefix first)
+            VERSION="${LATEST_TAG#${TAG_PREFIX}}"
+            IFS='.' read -ra PARTS <<< "$VERSION"
+            MAJOR=${PARTS[0]:-0}
+            MINOR=${PARTS[1]:-0}
+            echo "Current version: $MAJOR.$MINOR"
+          fi
+          
+          # Increment minor version by 1 (0.1 increments)
+          MINOR=$((MINOR + 1))
+          NEW_TAG="${TAG_PREFIX}${MAJOR}.${MINOR}"
+          
+          # Ensure the new tag doesn't already exist (keep incrementing if it does)
+          ATTEMPTS=0
+          while git rev-parse "$NEW_TAG" >/dev/null 2>&1; do
+            echo "⚠️ Tag $NEW_TAG already exists, incrementing..."
+            MINOR=$((MINOR + 1))
+            NEW_TAG="${TAG_PREFIX}${MAJOR}.${MINOR}"
+            ATTEMPTS=$((ATTEMPTS + 1))
+            if [ $ATTEMPTS -gt 100 ]; then
+              echo "❌ Error: Too many version increment attempts"
+              exit 1
+            fi
+          done
+          
+          echo "✅ New tag: $NEW_TAG"
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ steps.docker_tags.outputs.tag }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          platforms: linux/amd64,linux/arm64
+      
+      - name: Move cache
+        if: always()
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      
+      - name: Docker Hub Description
+        if: github.ref == 'refs/heads/main'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect
+          short-description: "ML-based cloud detection for AllSky cameras with MQTT and ASCOM Alpaca"
+          readme-filepath: ./readme.md
+      
+      - name: Get image size
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ steps.docker_tags.outputs.tag }}
+          IMAGE_SIZE=$(docker images --format "{{.Size}}" ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ steps.docker_tags.outputs.tag }} | head -n1)
+          echo "Docker image size: $IMAGE_SIZE"
+
+  release:
+    needs: build
+    if: needs.build.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Generate commit history
+      id: changelog
+      run: |
+        # Get the previous tag for this branch (excluding the tag we're about to create)
+        BRANCH_NAME="${{ needs.build.outputs.branch }}"
+        
+        if [ "$BRANCH_NAME" = "main" ]; then
+          TAG_PREFIX="v"
+          TAG_PATTERN="${TAG_PREFIX}*"
+        else
+          TAG_PREFIX="v-${BRANCH_NAME}-"
+          TAG_PATTERN="${TAG_PREFIX}*"
+        fi
+        
+        NEW_TAG="${{ needs.build.outputs.tag }}"
+        
+        # Get all matching tags, exclude the new tag if it exists, and get the latest
+        PREVIOUS_TAG=$(git tag -l "${TAG_PATTERN}" | grep -v "^${NEW_TAG}$" | sort -V | tail -n1)
+        
+        if [ -z "$PREVIOUS_TAG" ]; then
+          echo "No previous tag found, showing last 20 commits"
+          COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
+        else
+          echo "Generating changelog from $PREVIOUS_TAG to HEAD"
+          COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          
+          # If no commits found, it means we're on the same commit
+          if [ -z "$COMMITS" ]; then
+            echo "No new commits since $PREVIOUS_TAG"
+            COMMITS="- No changes since previous release"
+          fi
+        fi
+        
+        # Save to output using heredoc to handle multiline
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$COMMITS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
+    - name: Create and push tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Check if tag exists (should not happen due to version increment logic)
+        if git rev-parse "${{ needs.build.outputs.tag }}" >/dev/null 2>&1; then
+          echo "❌ Error: Tag ${{ needs.build.outputs.tag }} already exists"
+          echo "This should not happen - version increment logic failed"
+          exit 1
+        else
+          git tag ${{ needs.build.outputs.tag }}
+          git push origin ${{ needs.build.outputs.tag }}
+          echo "✅ Created and pushed tag ${{ needs.build.outputs.tag }}"
+        fi
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.build.outputs.tag }}
+        name: ${{ needs.build.outputs.release_type == 'test' && format('🧪 Test Release {0} ({1} branch)', needs.build.outputs.tag, needs.build.outputs.branch) || format('Release {0}', needs.build.outputs.tag) }}
+        prerelease: ${{ needs.build.outputs.release_type == 'test' }}
+        files: |
+          README.md
+          ALPACA_README.md
+        body: |
+          ${{ needs.build.outputs.release_type == 'test' && '## 🧪 Test Release' || '## 📦 SimpleCloudDetect' }}
+          ${{ needs.build.outputs.tag }}
+          
+          ${{ needs.build.outputs.release_type == 'test' && format('⚠️ **This is a pre-release test build from the `{0}` branch.**', needs.build.outputs.branch) || '' }}
+          ${{ needs.build.outputs.release_type == 'test' && '**Use for testing purposes only. For stable releases, use builds from the main branch.**' || '' }}
+          ${{ needs.build.outputs.release_type == 'test' && '' || 'ML-based cloud detection for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor support.' }}
+          
+          ### 🚀 Installation Methods
+          
+          #### Docker (Recommended)
+          ```bash
+          docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.build.outputs.docker_tag }}
+          ```
+          
+          #### Docker Compose
+          ${{ needs.build.outputs.release_type == 'test' && format('Update your docker-compose.yml to use the `{0}` tag:', needs.build.outputs.docker_tag) || 'See [README.md](README.md) for complete Docker Compose setup instructions.' }}
+          ${{ needs.build.outputs.release_type == 'test' && '```yaml' || '' }}
+          ${{ needs.build.outputs.release_type == 'test' && format('image: {0}/simpleclouddetect:{1}', vars.DOCKERHUB_USERNAME, needs.build.outputs.docker_tag) || '' }}
+          ${{ needs.build.outputs.release_type == 'test' && '```' || '' }}
+          
+          ### Key Features
+          - **ML-Based Cloud Detection**: Accurate sky condition classification using TensorFlow Lite
+          - **ASCOM Alpaca Integration**: Full SafetyMonitor device support for astronomy automation
+          - **MQTT Support**: Home Assistant auto-discovery and custom MQTT topics
+          - **Multi-Platform**: Docker images for AMD64 and ARM64 (Raspberry Pi)
+          - **Web Interface**: Configuration and monitoring via web UI
+          - **Configurable Safety Thresholds**: Per-class confidence levels and debounce timers
+          - **Latest Detection Image Thumbnail**: Visual confirmation on setup page
+          
+          ### Documentation
+          - [README.md](README.md) - Complete setup and features
+          - [ALPACA_README.md](ALPACA_README.md) - ASCOM Alpaca integration guide
+          
+          ### Changes in This Release
+          ${{ steps.changelog.outputs.changelog || '_No commits found_' }}
+          
+          ### Docker Image
+          ```bash
+          docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.build.outputs.docker_tag }}
+          ```
+          
+          **Multi-platform support:**
+          - `linux/amd64` - x86_64 systems
+          - `linux/arm64` - Raspberry Pi 3/4/5, ARM64 systems
+          ${{ needs.build.outputs.release_type == 'test' && format('
+          **Branch**: {0}', needs.build.outputs.branch) || '' }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
