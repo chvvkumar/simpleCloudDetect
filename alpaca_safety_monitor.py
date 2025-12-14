@@ -19,10 +19,13 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any
 import json
+import base64
+import io
 
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, Response
 from flask_cors import CORS
 import paho.mqtt.client as mqtt
+from PIL import Image
 
 from detect import CloudDetector, Config as DetectConfig, HADiscoveryManager
 
@@ -156,6 +159,9 @@ class AlpacaSafetyMonitor:
         # Safety state history (last 100 transitions)
         self._safety_history: list = []  # List of (timestamp, is_safe, condition, confidence) tuples
         
+        # Latest detection image (base64 encoded)
+        self.latest_image_data: Optional[str] = None
+        
         self.detection_lock = threading.Lock()
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
@@ -177,10 +183,18 @@ class AlpacaSafetyMonitor:
         # FIX: Blocking initial detection to ensure readiness (better than background thread)
         logger.info("Performing initial detection (blocking)...")
         try:
-            initial_result = self.cloud_detector.detect()
+            initial_result = self.cloud_detector.detect(return_image=True)
             initial_result['timestamp'] = get_current_time(self.alpaca_config.timezone)
+            
+            # Create thumbnail from the image that was just used for detection
+            initial_image = None
+            if 'image' in initial_result:
+                initial_image = self._create_thumbnail_from_image(initial_result['image'])
+                del initial_result['image']
+            
             with self.detection_lock:
                 self.latest_detection = initial_result
+                self.latest_image_data = initial_image
                 self._update_cached_safety(initial_result)
                 
                 # Add initial state to safety history
@@ -196,6 +210,23 @@ class AlpacaSafetyMonitor:
             logger.error(f"Initial detection failed: {e}")
         
         logger.info(f"Initialized {self.alpaca_config.device_name}")
+    
+    def _create_thumbnail_from_image(self, img: Image.Image) -> Optional[str]:
+        """Create base64-encoded thumbnail from a PIL image"""
+        try:
+            # Resize to thumbnail size (200x200) to reduce data size
+            img_copy = img.copy()
+            img_copy.thumbnail((200, 200), Image.Resampling.LANCZOS)
+            
+            # Convert to base64
+            buffered = io.BytesIO()
+            img_copy.save(buffered, format="JPEG", quality=85)
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            
+            return img_str
+        except Exception as e:
+            logger.warning(f"Failed to create thumbnail: {e}")
+            return None
     
     def _update_cached_safety(self, detection: Dict[str, Any]):
         """Update cached safety status with debouncing logic (assumes lock is held)"""
@@ -354,12 +385,21 @@ class AlpacaSafetyMonitor:
         while not self.stop_detection.is_set():
             try:
                 # Perform detection in background without blocking API responses
-                result = self.cloud_detector.detect()
+                # Request the image to be returned so we can create a thumbnail
+                result = self.cloud_detector.detect(return_image=True)
                 result['timestamp'] = get_current_time(self.alpaca_config.timezone)
+                
+                # Create thumbnail from the image that was just used for detection
+                image_data = None
+                if 'image' in result:
+                    image_data = self._create_thumbnail_from_image(result['image'])
+                    # Remove image from result before storing (don't need it in detection dict)
+                    del result['image']
                 
                 # Update ASCOM state
                 with self.detection_lock:
                     self.latest_detection = result
+                    self.latest_image_data = image_data
                     self._update_cached_safety(result)
                 
                 # Publish to MQTT (unified publishing)
@@ -710,6 +750,24 @@ def get_configured_devices():
     return jsonify(safety_monitor.create_response(value=value))
 
 
+@app.route('/api/v1/latest_image', methods=['GET'])
+def get_latest_image():
+    """Serve the latest detection image as JPEG"""
+    with safety_monitor.detection_lock:
+        image_data = safety_monitor.latest_image_data
+    
+    if image_data:
+        try:
+            # Decode base64 and return as image
+            img_bytes = base64.b64decode(image_data)
+            return Response(img_bytes, mimetype='image/jpeg')
+        except Exception as e:
+            logger.error(f"Failed to serve image: {e}")
+            return Response(status=404)
+    else:
+        return Response(status=404)
+
+
 def get_available_cloud_conditions() -> list:
     """Load cloud conditions from labels file"""
     try:
@@ -891,10 +949,18 @@ def setup_device(device_number: int):
         # Trigger immediate detection with new settings
         logger.info("Triggering immediate detection after config save")
         try:
-            result = safety_monitor.cloud_detector.detect()
+            result = safety_monitor.cloud_detector.detect(return_image=True)
             result['timestamp'] = get_current_time(safety_monitor.alpaca_config.timezone)
+            
+            # Create thumbnail from the image that was just used for detection
+            image_data = None
+            if 'image' in result:
+                image_data = safety_monitor._create_thumbnail_from_image(result['image'])
+                del result['image']
+            
             with safety_monitor.detection_lock:
                 safety_monitor.latest_detection = result
+                safety_monitor.latest_image_data = image_data
                 safety_monitor._update_cached_safety(result)
             logger.info(f"Immediate detection after config save: {result['class_name']} ({result['confidence_score']:.1f}%)")
         except Exception as e:
@@ -1292,6 +1358,11 @@ def setup_device(device_number: int):
                 .input-group > div[style*="grid-template-columns: 1fr 1fr"] {
                     grid-template-columns: 1fr !important;
                 }
+                
+                /* Stack status cards on mobile */
+                .status-grid > div[style*="grid-template-columns: 2fr 1fr 1fr"] {
+                    grid-template-columns: 1fr !important;
+                }
             }
             
             @media (max-width: 1200px) {
@@ -1614,7 +1685,7 @@ def setup_device(device_number: int):
                     
                     <div class="status-grid">
                         <!-- Current Detection - Prominent -->
-                        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
+                        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px;">
                             <!-- Current Detection - Prominent -->
                             <div class="status-card status-card-large">
                                 <div class="status-card-title detection-title">⚡ Current Detection</div>
@@ -1663,6 +1734,20 @@ def setup_device(device_number: int):
                                             No state changes yet
                                         </div>
                                     {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Latest Detection Image -->
+                            <div class="status-card">
+                                <div class="status-card-title">📷 Latest Image</div>
+                                <div style="display: flex; justify-content: center; align-items: center; padding: 8px;">
+                                    <img id="latest-image" src="/api/v1/latest_image?t={{ last_update }}" 
+                                         alt="Latest Detection" 
+                                         style="max-width: 100%; max-height: 200px; border-radius: 6px; border: 1px solid rgba(71, 85, 105, 0.5);"
+                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                    <div style="display: none; text-align: center; color: rgb(148, 163, 184); font-size: 12px; padding: 20px;">
+                                        No image available
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1796,6 +1881,13 @@ def setup_device(device_number: int):
                                     statusSpan.className = newStatusSpan.className;
                                     statusSpan.textContent = newStatusSpan.textContent;
                                 }
+                            }
+                            
+                            // Update Latest Image - refresh with timestamp to avoid cache
+                            const latestImage = document.getElementById('latest-image');
+                            if (latestImage) {
+                                const timestamp = new Date().getTime();
+                                latestImage.src = '/api/v1/latest_image?t=' + timestamp;
                             }
                         })
                         .catch(error => console.error('Error updating status:', error));

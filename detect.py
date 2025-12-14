@@ -269,8 +269,12 @@ class CloudDetector:
         normalized_array = (image_array.astype(np.float32) / 127.5) - 1
         return np.expand_dims(normalized_array, axis=0)
 
-    def detect(self) -> dict:
-        """Perform cloud detection on an image"""
+    def detect(self, return_image: bool = False) -> dict:
+        """Perform cloud detection on an image
+        
+        Args:
+            return_image: If True, include the raw PIL Image in the result under 'image' key
+        """
         start_time = time.time()
         
         try:
@@ -295,11 +299,6 @@ class CloudDetector:
             
             confidence_score = float(prediction[0][index])
             
-            # FIX: Force garbage collection to prevent memory fragmentation on Pi
-            del image
-            del preprocessed_image
-            gc.collect()
-            
             elapsed_time = time.time() - start_time
             
             result = {
@@ -307,6 +306,15 @@ class CloudDetector:
                 "confidence_score": round(confidence_score * 100, 2),
                 "Detection Time (Seconds)": round(elapsed_time, 2)
             }
+            
+            # Optionally include the raw image before cleanup
+            if return_image:
+                result['image'] = image.copy()  # Return a copy since we'll delete the original
+            
+            # FIX: Force garbage collection to prevent memory fragmentation on Pi
+            del image
+            del preprocessed_image
+            gc.collect()
             
             logger.info(f"Detection: {result}")
             return result
