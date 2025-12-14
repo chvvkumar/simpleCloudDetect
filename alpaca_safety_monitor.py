@@ -365,11 +365,16 @@ class AlpacaSafetyMonitor:
                 # Publish to MQTT (unified publishing)
                 if self.mqtt_client:
                     try:
+                        # Convert datetime to ISO format for JSON serialization
+                        mqtt_result = result.copy()
+                        if 'timestamp' in mqtt_result and isinstance(mqtt_result['timestamp'], datetime):
+                            mqtt_result['timestamp'] = mqtt_result['timestamp'].isoformat()
+                        
                         if self.detect_config.mqtt_discovery_mode == 'homeassistant':
-                            self.ha_discovery.publish_states(result)
+                            self.ha_discovery.publish_states(mqtt_result)
                         else:
                             # Legacy single-topic publishing
-                            self.mqtt_client.publish(self.detect_config.topic, json.dumps(result))
+                            self.mqtt_client.publish(self.detect_config.topic, json.dumps(mqtt_result))
                     except Exception as e:
                         logger.error(f"MQTT publish failed: {e}")
                 
