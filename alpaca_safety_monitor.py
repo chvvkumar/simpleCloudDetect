@@ -1360,7 +1360,7 @@ def setup_device(device_number: int):
                 }
                 
                 /* Stack status cards on mobile */
-                .status-grid > div[style*="grid-template-columns: 2fr 1fr 1fr"] {
+                .status-grid > div[style*="grid-template-columns: 1fr 2fr 1fr"] {
                     grid-template-columns: 1fr !important;
                 }
             }
@@ -1685,7 +1685,21 @@ def setup_device(device_number: int):
                     
                     <div class="status-grid">
                         <!-- Current Detection - Prominent -->
-                        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px;">
+                        <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 16px;">
+                            <!-- Latest Detection Image -->
+                            <div class="status-card">
+                                <div class="status-card-title">📷 Latest Image</div>
+                                <div style="display: flex; justify-content: center; align-items: center; padding: 8px; min-height: 250px;">
+                                    <img id="latest-image" src="/api/v1/latest_image?t={{ last_update }}" 
+                                         alt="Latest Detection" 
+                                         style="width: 100%; height: 100%; object-fit: contain; border-radius: 6px; border: 1px solid rgba(71, 85, 105, 0.5);"
+                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                    <div style="display: none; justify-content: center; align-items: center; text-align: center; color: rgb(148, 163, 184); font-size: 12px; padding: 20px; width: 100%; height: 100%;">
+                                        No image available
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <!-- Current Detection - Prominent -->
                             <div class="status-card status-card-large">
                                 <div class="status-card-title detection-title">⚡ Current Detection</div>
@@ -1716,7 +1730,7 @@ def setup_device(device_number: int):
                             <!-- Safety State History -->
                             <div class="status-card">
                                 <div class="status-card-title">📜 Safety History</div>
-                                <div style="max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+                                <div style="max-height: 250px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
                                     {% if safety_history %}
                                         {% for entry in safety_history %}
                                         <div style="padding: 4px 8px; border-bottom: 1px solid rgba(71, 85, 105, 0.3); display: flex; justify-content: space-between; align-items: center;">
@@ -1734,20 +1748,6 @@ def setup_device(device_number: int):
                                             No state changes yet
                                         </div>
                                     {% endif %}
-                                </div>
-                            </div>
-                            
-                            <!-- Latest Detection Image -->
-                            <div class="status-card">
-                                <div class="status-card-title">📷 Latest Image</div>
-                                <div style="display: flex; justify-content: center; align-items: center; padding: 8px;">
-                                    <img id="latest-image" src="/api/v1/latest_image?t={{ last_update }}" 
-                                         alt="Latest Detection" 
-                                         style="max-width: 100%; max-height: 200px; border-radius: 6px; border: 1px solid rgba(71, 85, 105, 0.5);"
-                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                                    <div style="display: none; text-align: center; color: rgb(148, 163, 184); font-size: 12px; padding: 20px;">
-                                        No image available
-                                    </div>
                                 </div>
                             </div>
                         </div>
