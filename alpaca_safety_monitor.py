@@ -961,7 +961,7 @@ def setup_device(device_number: int):
             
             .container {
                 max-width: 1400px;
-                margin: 50px auto;
+                margin: 0 auto;
                 position: relative;
                 z-index: 1;
             }
