@@ -11,7 +11,7 @@ import os
 # This prevents the "30% confidence" bug.
 print("🔧 Policy: Default (Float32)")
 
-MODEL_PATH = 'model.keras'
+MODEL_PATH = 'model_clean.keras'
 IMG_SIZE = (260, 260)
 
 def test_file(filepath, label):
