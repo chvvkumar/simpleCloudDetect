@@ -151,7 +151,8 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
     # Scheduler: Drop learning rate if validation loss stalls
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2, verbose=True)
+    # Removed verbose=True as it is deprecated/removed in newer PyTorch versions
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2)
 
     # 4. Training Loop with Early Stopping
     best_model_wts = copy.deepcopy(model.state_dict())
