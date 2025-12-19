@@ -8,15 +8,50 @@ import tensorflow as tf
 from tensorflow.keras import mixed_precision
 from pathlib import Path
 import time
+import subprocess
+import datetime
 
 # --- Configuration ---
 IMG_SIZE = (260, 260)       
-BATCH_SIZE = 64             # Lowered to 64 for stability
+BATCH_SIZE = 64             
 EPOCHS_INITIAL = 10
 EPOCHS_FINE = 10
 LEARNING_RATE = 1e-3
 MODEL_SAVE_PATH = 'model.keras'
 LABELS_SAVE_PATH = 'labels.txt'
+
+# --- Custom GPU Monitor Callback ---
+class GPULogger(tf.keras.callbacks.Callback):
+    def __init__(self, log_freq=50):
+        """
+        log_freq: Run gpu check every N batches.
+        """
+        self.log_freq = log_freq
+
+    def on_train_batch_end(self, batch, logs=None):
+        # Only run every 'log_freq' batches to avoid slowing down training
+        if batch % self.log_freq == 0 and batch > 0:
+            try:
+                # Query nvidia-smi for precise stats
+                # util-gpu: GPU Core Usage (%)
+                # memory.used: VRAM Usage (MB)
+                # power.draw: Power Usage (Watts)
+                # temperature.gpu: Core Temp (C)
+                cmd = "nvidia-smi --query-gpu=utilization.gpu,memory.used,power.draw,temperature.gpu --format=csv,noheader,nounits"
+                result = subprocess.check_output(cmd, shell=True).decode('utf-8').strip()
+                util, mem, power, temp = result.split(',')
+                
+                # Get current timestamp
+                now = datetime.datetime.now().strftime("%H:%M:%S")
+                
+                # Color code utilization (Red if low, Green if high)
+                util = float(util)
+                color = "\033[92m" if util > 80 else "\033[91m" # Green > 80%, else Red
+                reset = "\033[0m"
+                
+                print(f"\n   [GPU {now}] Util: {color}{util}%{reset} | Mem: {mem.strip()}MB | Pwr: {power.strip()}W | Temp: {temp.strip()}C")
+            except Exception as e:
+                pass # Don't crash training if nvidia-smi fails slightly
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train Cloud Detection Model')
@@ -71,8 +106,6 @@ def main():
 
     # 3. Optimize Data Loading
     AUTOTUNE = tf.data.AUTOTUNE
-    # CRITICAL FIX: Removed .cache() to prevent RAM explosion.
-    # We rely on .prefetch() to keep the GPU fed without storing everything in RAM.
     train_ds = train_ds.shuffle(1000).prefetch(buffer_size=AUTOTUNE)
     val_ds = val_ds.prefetch(buffer_size=AUTOTUNE)
 
@@ -98,7 +131,6 @@ def main():
     x = base_model(x, training=False)
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     x = tf.keras.layers.Dropout(0.2)(x)
-    
     x = tf.keras.layers.Dense(len(class_names))(x) 
     outputs = tf.keras.layers.Activation('softmax', dtype='float32', name='predictions')(x)
 
@@ -113,7 +145,17 @@ def main():
     # 6. Initial Training
     print("--- Starting Phase 1: Training Head ---")
     t0 = time.time()
-    history = model.fit(train_ds, epochs=EPOCHS_INITIAL, validation_data=val_ds)
+    
+    # ADDED CALLBACK HERE
+    gpu_callback = GPULogger(log_freq=50) # Log every 50 batches
+    
+    history = model.fit(
+        train_ds, 
+        epochs=EPOCHS_INITIAL, 
+        validation_data=val_ds,
+        callbacks=[gpu_callback]
+    )
+    
     t1 = time.time()
     print(f"✅ Phase 1 Duration: {(t1 - t0)/60:.2f} minutes")
 
@@ -123,7 +165,6 @@ def main():
     
     total_epochs = EPOCHS_INITIAL + EPOCHS_FINE
     
-    # Unfreeze top layers
     for layer in base_model.layers[:-100]:
         layer.trainable = False
 
@@ -138,7 +179,8 @@ def main():
         train_ds,
         epochs=total_epochs,
         initial_epoch=history.epoch[-1],
-        validation_data=val_ds
+        validation_data=val_ds,
+        callbacks=[gpu_callback] # Add callback here too
     )
     t3 = time.time()
     print(f"✅ Phase 2 Duration: {(t3 - t2)/60:.2f} minutes")
