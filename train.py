@@ -5,16 +5,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import tensorflow as tf
-from tensorflow.keras import mixed_precision # Added for mixed precision
+from tensorflow.keras import mixed_precision
 from pathlib import Path
 import time
 
 # --- Configuration ---
-IMG_SIZE = (224, 224)       # Standard size for MobileNetV2
-BATCH_SIZE = 32
-EPOCHS_INITIAL = 10         # Epochs for frozen base training
-EPOCHS_FINE = 10            # Epochs for fine-tuning
-LEARNING_RATE = 0.0001
+# EfficientNetV2S works best at slightly higher resolutions, but 260 is a good balance.
+IMG_SIZE = (260, 260)       
+# RTX 5070 Ti can easily handle 128 with Mixed Precision.
+# If you get OOM (Out of Memory) errors with 3x data, drop this to 64.
+BATCH_SIZE = 128            
+EPOCHS_INITIAL = 10
+EPOCHS_FINE = 10
+LEARNING_RATE = 1e-3        # Slightly higher initial rate for larger batch size
 MODEL_SAVE_PATH = 'model.keras'
 LABELS_SAVE_PATH = 'labels.txt'
 
@@ -31,9 +34,7 @@ def main():
     # 1. GPU & Mixed Precision Setup
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
-        print(f"✅ Found {len(gpus)} GPU(s). Training will be accelerated.")
-        # Enable Mixed Precision (FP16)
-        # This dramatically speeds up training on RTX cards and reduces VRAM usage
+        print(f"✅ Found {len(gpus)} GPU(s).")
         policy = mixed_precision.Policy('mixed_float16')
         mixed_precision.set_global_policy(policy)
         print(f"✅ Mixed Precision enabled: {policy.compute_dtype}")
@@ -66,7 +67,6 @@ def main():
         )
     except ValueError as e:
         print(f"❌ Error loading dataset: {e}")
-        print("Ensure the directory contains subfolders for each class.")
         return
 
     class_names = train_ds.class_names
@@ -74,91 +74,94 @@ def main():
 
     # 3. Optimize Data Loading
     AUTOTUNE = tf.data.AUTOTUNE
+    # Note: With 60k+ images, .cache() might fill your RAM. 
+    # If your PC slows down, remove .cache() and just keep .prefetch()
     train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
     val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
 
-    # 4. Data Augmentation
+    # 4. Data Augmentation (Enhanced for Clouds)
     data_augmentation = tf.keras.Sequential([
         tf.keras.layers.RandomFlip('horizontal'),
         tf.keras.layers.RandomRotation(0.2),
-        tf.keras.layers.RandomZoom(0.1),
+        tf.keras.layers.RandomZoom(0.2),
+        # Clouds depend heavily on lighting; this helps the model generalize
+        tf.keras.layers.RandomContrast(0.2), 
     ])
 
-    # 5. Create Model (MobileNetV2 Transfer Learning)
-    preprocess_input = tf.keras.applications.mobilenet_v2.preprocess_input
-
-    base_model = tf.keras.applications.MobileNetV2(
+    # 5. Create Model (EfficientNetV2S)
+    # Note: EfficientNetV2 expects [0-255] inputs, so we DO NOT manually preprocess/scale.
+    
+    base_model = tf.keras.applications.EfficientNetV2S(
         input_shape=IMG_SIZE + (3,),
         include_top=False,
-        weights='imagenet'
+        weights='imagenet',
+        include_preprocessing=True # Internal rescaling logic
     )
-    base_model.trainable = False  # Freeze base model
+    base_model.trainable = False
 
     inputs = tf.keras.Input(shape=IMG_SIZE + (3,))
     x = data_augmentation(inputs)
-    x = preprocess_input(x)
+    # We feed raw inputs directly; the model handles normalization
     x = base_model(x, training=False)
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     x = tf.keras.layers.Dropout(0.2)(x)
     
-    # --- MODIFIED OUTPUT FOR MIXED PRECISION ---
-    # We remove the activation from the Dense layer and add it separately.
-    # The output activation MUST be float32 for numeric stability.
+    # Output Layer
     x = tf.keras.layers.Dense(len(class_names))(x) 
     outputs = tf.keras.layers.Activation('softmax', dtype='float32', name='predictions')(x)
 
     model = tf.keras.Model(inputs, outputs)
 
+    # COMPILE WITH XLA (jit_compile=True)
+    # This fuses operations for the RTX 5070 Ti
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
-        metrics=['accuracy']
+        metrics=['accuracy'],
+        jit_compile=True 
     )
 
     # 6. Initial Training
     print("--- Starting Phase 1: Training Head ---")
-    start_time = time.time()
-    history = model.fit(
-        train_ds,
-        epochs=EPOCHS_INITIAL,
-        validation_data=val_ds
-    )
-    print(f"Phase 1 completed in {time.time() - start_time:.2f} seconds.")
+    t0 = time.time()
+    history = model.fit(train_ds, epochs=EPOCHS_INITIAL, validation_data=val_ds)
+    t1 = time.time()
+    print(f"✅ Phase 1 Duration: {(t1 - t0)/60:.2f} minutes")
 
     # 7. Fine-Tuning
     print("--- Starting Phase 2: Fine-Tuning Base ---")
     base_model.trainable = True
     
-    # Fine-tune from this layer onwards
-    fine_tune_at = 100
-    for layer in base_model.layers[:fine_tune_at]:
+    total_epochs = EPOCHS_INITIAL + EPOCHS_FINE
+    
+    # Unfreeze the top layers. EfficientNetV2S is deep; unfreezing the top 50-100 is usually enough.
+    # We calculate the starting point dynamically.
+    for layer in base_model.layers[:-100]:
         layer.trainable = False
 
     model.compile(
         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
         optimizer=tf.keras.optimizers.RMSprop(learning_rate=LEARNING_RATE/10),
-        metrics=['accuracy']
+        metrics=['accuracy'],
+        jit_compile=True # Keep XLA on
     )
     
-    total_epochs = EPOCHS_INITIAL + EPOCHS_FINE
+    t2 = time.time()
     history_fine = model.fit(
         train_ds,
         epochs=total_epochs,
         initial_epoch=history.epoch[-1],
         validation_data=val_ds
     )
-    end_time = time.time()
-    total_duration = end_time - start_time
-    # Convert to minutes and seconds
-    minutes = int(total_duration // 60)
-    seconds = int(total_duration % 60)
-    print(f"Phase 2 completed in {total_duration - (end_time - start_time):.2f} seconds.")
-    print(f"⏱️ Total Training Time: {minutes}m {seconds}s")
+    t3 = time.time()
+    print(f"✅ Phase 2 Duration: {(t3 - t2)/60:.2f} minutes")
+    
+    print(f"⏱️ Total Training Time: {(t3 - t0)/60:.2f} minutes")
 
-    # 8. Save Artifacts
+    # 8. Save
     print(f"Saving model to {MODEL_SAVE_PATH}...")
     model.save(MODEL_SAVE_PATH)
-
+    
     print(f"Saving labels to {LABELS_SAVE_PATH}...")
     with open(LABELS_SAVE_PATH, 'w') as f:
         for name in class_names:
