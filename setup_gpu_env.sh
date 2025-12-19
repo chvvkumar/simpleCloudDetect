@@ -10,7 +10,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}--- Setting up TensorFlow Environment for RTX 5070 Ti (WSL) ---${NC}"
+echo -e "${YELLOW}--- Setting up TensorFlow Nightly for RTX 5070 Ti (WSL) ---${NC}"
 
 # 1. Check for Python
 if ! command -v $PYTHON &> /dev/null; then
@@ -31,21 +31,19 @@ $PYTHON -m venv $VENV_NAME
 # 4. Activate venv
 source $VENV_NAME/bin/activate
 
-# 5. Upgrade pip (Critical for new wheels)
+# 5. Upgrade pip
 echo -e "${GREEN}Upgrading pip...${NC}"
 pip install --upgrade pip
 
-# 6. Install TensorFlow with CUDA bundles
-# We use standard tensorflow[and-cuda] first. 
-# If you are on bleeding edge hardware, this is usually safer than nightly unless standard fails hard.
-echo -e "${GREEN}Installing TensorFlow[and-cuda] and dependencies...${NC}"
-pip install "tensorflow[and-cuda]" matplotlib numpy
+# 6. Install tf-nightly (REQUIRED for RTX 50-series/Compute Capability 12.0)
+echo -e "${GREEN}Installing tf-nightly[and-cuda]...${NC}"
+# We uninstall standard tensorflow first just in case, then install nightly
+pip uninstall -y tensorflow
+pip install "tf-nightly[and-cuda]" matplotlib numpy
 
 # 7. Generate Activation Script with LD_LIBRARY_PATH
-# This is the MAGIC STEP that fixes "Cannot dlopen some GPU libraries"
 echo -e "${GREEN}Configuring CUDA paths...${NC}"
 
-SITE_PACKAGES=$($PYTHON -c "import site; print(site.getsitepackages()[0])")
 cat > run_with_gpu.sh << EOF
 #!/bin/bash
 # Source the venv
@@ -64,8 +62,10 @@ export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-pack
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/nccl/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/nvjitlink/lib
 
-# Reduce OneDNN verbosity
-export TF_ENABLE_ONEDNN_OPTS=0
+# --- FIX FOR RTX 50-SERIES JIT COMPILATION ---
+# Disable XLA if errors persist, but Nightly should handle it. 
+# Uncomment the line below if you still see PTX errors with Nightly:
+# export TF_XLA_FLAGS="--tf_xla_enable_xla_devices=false"
 
 # Execute the command passed to this script
 exec "\$@"
@@ -73,15 +73,7 @@ EOF
 
 chmod +x run_with_gpu.sh
 
-echo -e "${GREEN}Setup Complete!${NC}"
+echo -e "${GREEN}Setup Complete! (Nightly Build)${NC}"
 echo -e "${YELLOW}IMPORTANT: Ensure your Windows NVIDIA Driver is fully updated via GeForce Experience.${NC}"
 echo -e "To train, run this command:"
 echo -e "${GREEN}./run_with_gpu.sh python train.py --data_dir /mnt/f/MLClouds_incoming/resized/${NC}"
-```
-
-### How to use it:
-
-1.  **Run the setup:**
-    ```bash
-    chmod +x setup_gpu_env.sh
-    ./setup_gpu_env.sh
