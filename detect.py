@@ -16,7 +16,7 @@ import numpy as np
 import paho.mqtt.client as mqtt
 import requests
 from PIL import Image, ImageOps
-from keras.models import load_model
+import onnxruntime as ort
 
 # Configure logging
 logging.basicConfig(
@@ -65,7 +65,7 @@ class Config:
         
         return cls(
             image_url=os.environ['IMAGE_URL'],
-            model_path=os.getenv('MODEL_PATH', 'keras_model.h5'),
+            model_path=os.getenv('MODEL_PATH', 'model.onnx'),
             label_path=os.getenv('LABEL_PATH', 'labels.txt'),
             broker=os.environ['MQTT_BROKER'],
             port=int(os.getenv('MQTT_PORT', '1883')),
@@ -193,9 +193,10 @@ class CloudDetector:
             self.ha_discovery.publish_discovery_configs()
         
     def _load_model(self):
-        """Load and return the Keras model"""
+        """Load and return the ONNX model session"""
         try:
-            return load_model(self.config.model_path, compile=False)
+            # Use CPU Provider for Raspberry Pi
+            return ort.InferenceSession(self.config.model_path, providers=['CPUExecutionProvider'])
         except Exception as e:
             logger.error(f"Failed to load model from {self.config.model_path}: {e}")
             raise
@@ -263,11 +264,16 @@ class CloudDetector:
 
     def _preprocess_image(self, image: Image.Image) -> np.ndarray:
         """Preprocess image for model input"""
-        # Resize and normalize image
+        # Resize
         image = ImageOps.fit(image, (224, 224), Image.Resampling.LANCZOS)
-        image_array = np.asarray(image)
-        normalized_array = (image_array.astype(np.float32) / 127.5) - 1
-        return np.expand_dims(normalized_array, axis=0)
+        # Normalize (ImageNet stats)
+        img_data = np.array(image).astype(np.float32) / 255.0
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        img_data = (img_data - mean) / std
+        # Transpose to (Batch, Channel, Height, Width)
+        img_data = img_data.transpose(2, 0, 1)
+        return np.expand_dims(img_data, axis=0)
 
     def detect(self) -> dict:
         """Perform cloud detection on an image"""
@@ -278,9 +284,14 @@ class CloudDetector:
             image = self._load_image(self.config.image_url)
             preprocessed_image = self._preprocess_image(image)
             
-            # Make prediction
-            prediction = self.model.predict(preprocessed_image, verbose=0)
-            index = np.argmax(prediction)
+            # Make prediction with ONNX
+            input_name = self.model.get_inputs()[0].name
+            outputs = self.model.run(None, {input_name: preprocessed_image})
+            
+            # Softmax
+            logits = outputs[0][0]
+            probs = np.exp(logits) / np.sum(np.exp(logits))
+            index = np.argmax(probs)
             
             # FIX: Robust label parsing - handles "0 Clear" -> "Clear" format
             if index < len(self.class_names):
@@ -293,7 +304,7 @@ class CloudDetector:
             else:
                 class_name = "Unknown"
             
-            confidence_score = float(prediction[0][index])
+            confidence_score = float(probs[index])
             
             # FIX: Force garbage collection to prevent memory fragmentation on Pi
             del image

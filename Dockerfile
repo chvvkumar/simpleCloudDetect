@@ -1,47 +1,22 @@
-# Use the official Python image from the Docker Hub
-FROM python:3.11-slim AS builder
-
-# Set the working directory
-WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    make \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy ONLY requirements files first for better layer caching
-COPY requirements.txt requirements-arm64.txt ./
-
-# Install dependencies based on architecture
-ARG TARGETPLATFORM
-RUN pip install --no-cache-dir --upgrade pip && \
-    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        pip install --no-cache-dir -r requirements-arm64.txt; \
-    else \
-        pip install --no-cache-dir -r requirements.txt; \
-    fi
-
-# Final stage
-FROM python:3.11-slim
+FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install curl for healthcheck
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
     curl \
     dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Python deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser
 
-# Copy Python packages and binaries from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy application code (this layer changes frequently, so it's last)
+# Copy App
 COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
 
 # Fix line endings and make the startup script executable and set ownership
