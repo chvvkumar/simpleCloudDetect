@@ -4,17 +4,16 @@
 echo "Updating system..."
 sudo apt-get update && sudo apt-get install -y python3-pip python3-venv
 
-# 2. Create Project Directory
-PROJECT_DIR=~/simpleCloudDetect_Modern
-mkdir -p "$PROJECT_DIR"
-cd "$PROJECT_DIR"
+# 2. Use current directory as project directory
+PROJECT_DIR=$(pwd)
+echo "Setting up environment in: $PROJECT_DIR"
 
 # 3. Create Virtual Environment
 echo "Creating virtual environment..."
-python3 -m venv venv
+python3 -m venv venv_pytorch
 
 # 4. Activate Environment
-source venv/bin/activate
+source venv_pytorch/bin/activate
 
 # 5. Install PyTorch with CUDA Support (for NVIDIA GPU)
 # Note: Assumes CUDA drivers are installed on Windows host
@@ -29,9 +28,11 @@ pip install onnx onnxruntime pillow numpy requests
 # This lets you refer to 'dataset' instead of the full path
 if [ -d "/mnt/f/MLClouds_incoming/resized/" ]; then
     echo "Linking dataset..."
-    ln -s /mnt/f/MLClouds_incoming/resized/ dataset
+    ln -sf /mnt/f/MLClouds_incoming/resized/ dataset
 else
     echo "Warning: Dataset path /mnt/f/MLClouds_incoming/resized/ not found."
 fi
 
-echo "Setup complete! Activate via: source ~/simpleCloudDetect_Modern/venv/bin/activate"
+echo "Setup complete!"
+echo "To use this environment, run: source venv_pytorch/bin/activate"
+echo "Then you can train with: python train_model.py"
