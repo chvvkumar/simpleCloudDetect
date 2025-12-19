@@ -69,8 +69,8 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         print(f"   GPU: {torch.cuda.get_device_name(0)}")
         print(f"   Batch Size: {batch_size}")
         print(f"   Architecture: {arch}")
-        # Initial Memory Check
-        print(f"   Initial Memory: {torch.cuda.memory_allocated(0)/1024**3:.2f}GB allocated")
+        # Reset peak memory stats at start
+        torch.cuda.reset_peak_memory_stats()
         # Optimization for consistent input sizes
         torch.backends.cudnn.benchmark = True
 
@@ -170,6 +170,10 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         print(f"\nEpoch {epoch+1}/{epochs}")
         print("-" * 10)
 
+        # Reset peak memory for this epoch
+        if device.type == 'cuda':
+            torch.cuda.reset_peak_memory_stats()
+
         # --- Training Phase ---
         model.train()
         running_loss = 0.0
@@ -181,36 +185,48 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         num_batches = len(train_loader)
         end_time = time.time()
 
-        for i, (inputs, labels) in enumerate(train_loader):
-            # Measure Data Loading Time
-            data_time = time.time() - end_time
-            total_data_time += data_time
+        try:
+            for i, (inputs, labels) in enumerate(train_loader):
+                # Measure Data Loading Time
+                data_time = time.time() - end_time
+                total_data_time += data_time
 
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-            
-            # Start Compute Timing
-            compute_start = time.time()
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                
+                # Start Compute Timing
+                compute_start = time.time()
 
-            optimizer.zero_grad()
+                optimizer.zero_grad()
 
-            # Enable mixed precision could speed up more, but let's stick to simple FP32 with high batch size first
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            loss = criterion(outputs, labels)
+                # Enable mixed precision could speed up more, but let's stick to simple FP32 with high batch size first
+                outputs = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                loss = criterion(outputs, labels)
 
-            loss.backward()
-            optimizer.step()
-            
-            # Measure Compute Time
-            compute_time = time.time() - compute_start
-            total_compute_time += compute_time
+                loss.backward()
+                optimizer.step()
+                
+                # Measure Compute Time
+                compute_time = time.time() - compute_start
+                total_compute_time += compute_time
 
-            running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data)
-            
-            # Reset end time
-            end_time = time.time()
+                running_loss += loss.item() * inputs.size(0)
+                running_corrects += torch.sum(preds == labels.data)
+                
+                # Reset end time
+                end_time = time.time()
+        
+        except RuntimeError as e:
+            if "out of memory" in str(e):
+                print(f"\n🛑 CUDA Out of Memory! Batch size {batch_size} is too large.")
+                print("   Try reducing it to 256 or 384.")
+                if device.type == 'cuda':
+                    print(f"   Peak Memory reached: {torch.cuda.max_memory_allocated(0)/1024**3:.2f}GB")
+                    torch.cuda.empty_cache()
+                return
+            else:
+                raise e
 
         epoch_loss = running_loss / len(train_dataset)
         epoch_acc = running_corrects.double() / len(train_dataset)
@@ -226,11 +242,11 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         else:
              print("   ✅ Bottleneck: COMPUTE (GPU). This is ideal.")
 
-        # GPU Monitoring
+        # GPU Monitoring (Peak vs Current)
         if device.type == 'cuda':
-            alloc = torch.cuda.memory_allocated(0) / 1024**3
-            cached = torch.cuda.memory_reserved(0) / 1024**3
-            print(f"   GPU Mem: Alloc: {alloc:.2f}GB | Cached: {cached:.2f}GB")
+            max_mem = torch.cuda.max_memory_allocated(0) / 1024**3
+            cur_mem = torch.cuda.memory_allocated(0) / 1024**3
+            print(f"   GPU Mem: Peak: {max_mem:.2f}GB | Current: {cur_mem:.2f}GB")
 
         # --- Validation Phase ---
         model.eval()
