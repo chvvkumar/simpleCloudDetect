@@ -10,14 +10,11 @@ from pathlib import Path
 import time
 
 # --- Configuration ---
-# EfficientNetV2S works best at slightly higher resolutions, but 260 is a good balance.
 IMG_SIZE = (260, 260)       
-# RTX 5070 Ti can easily handle 128 with Mixed Precision.
-# If you get OOM (Out of Memory) errors with 3x data, drop this to 64.
-BATCH_SIZE = 128            
+BATCH_SIZE = 64             # Lowered to 64 for stability
 EPOCHS_INITIAL = 10
 EPOCHS_FINE = 10
-LEARNING_RATE = 1e-3        # Slightly higher initial rate for larger batch size
+LEARNING_RATE = 1e-3
 MODEL_SAVE_PATH = 'model.keras'
 LABELS_SAVE_PATH = 'labels.txt'
 
@@ -74,51 +71,43 @@ def main():
 
     # 3. Optimize Data Loading
     AUTOTUNE = tf.data.AUTOTUNE
-    # Note: With 60k+ images, .cache() might fill your RAM. 
-    # If your PC slows down, remove .cache() and just keep .prefetch()
-    train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
-    val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
+    # CRITICAL FIX: Removed .cache() to prevent RAM explosion.
+    # We rely on .prefetch() to keep the GPU fed without storing everything in RAM.
+    train_ds = train_ds.shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+    val_ds = val_ds.prefetch(buffer_size=AUTOTUNE)
 
-    # 4. Data Augmentation (Enhanced for Clouds)
+    # 4. Data Augmentation
     data_augmentation = tf.keras.Sequential([
         tf.keras.layers.RandomFlip('horizontal'),
         tf.keras.layers.RandomRotation(0.2),
         tf.keras.layers.RandomZoom(0.2),
-        # Clouds depend heavily on lighting; this helps the model generalize
         tf.keras.layers.RandomContrast(0.2), 
     ])
 
     # 5. Create Model (EfficientNetV2S)
-    # Note: EfficientNetV2 expects [0-255] inputs, so we DO NOT manually preprocess/scale.
-    
     base_model = tf.keras.applications.EfficientNetV2S(
         input_shape=IMG_SIZE + (3,),
         include_top=False,
         weights='imagenet',
-        include_preprocessing=True # Internal rescaling logic
+        include_preprocessing=True 
     )
     base_model.trainable = False
 
     inputs = tf.keras.Input(shape=IMG_SIZE + (3,))
     x = data_augmentation(inputs)
-    # We feed raw inputs directly; the model handles normalization
     x = base_model(x, training=False)
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     x = tf.keras.layers.Dropout(0.2)(x)
     
-    # Output Layer
     x = tf.keras.layers.Dense(len(class_names))(x) 
     outputs = tf.keras.layers.Activation('softmax', dtype='float32', name='predictions')(x)
 
     model = tf.keras.Model(inputs, outputs)
 
-    # COMPILE WITH XLA (jit_compile=True)
-    # This fuses operations for the RTX 5070 Ti
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
-        metrics=['accuracy'],
-        jit_compile=True 
+        metrics=['accuracy']
     )
 
     # 6. Initial Training
@@ -134,16 +123,14 @@ def main():
     
     total_epochs = EPOCHS_INITIAL + EPOCHS_FINE
     
-    # Unfreeze the top layers. EfficientNetV2S is deep; unfreezing the top 50-100 is usually enough.
-    # We calculate the starting point dynamically.
+    # Unfreeze top layers
     for layer in base_model.layers[:-100]:
         layer.trainable = False
 
     model.compile(
         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
         optimizer=tf.keras.optimizers.RMSprop(learning_rate=LEARNING_RATE/10),
-        metrics=['accuracy'],
-        jit_compile=True # Keep XLA on
+        metrics=['accuracy']
     )
     
     t2 = time.time()
