@@ -7,6 +7,7 @@ import os
 import argparse
 import random
 import copy
+import time
 from PIL import Image
 
 # ---------------------------------------------------------
@@ -173,10 +174,23 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         model.train()
         running_loss = 0.0
         running_corrects = 0
+        
+        # Timing Stats
+        total_data_time = 0.0
+        total_compute_time = 0.0
+        num_batches = len(train_loader)
+        end_time = time.time()
 
-        for inputs, labels in train_loader:
+        for i, (inputs, labels) in enumerate(train_loader):
+            # Measure Data Loading Time
+            data_time = time.time() - end_time
+            total_data_time += data_time
+
             inputs = inputs.to(device)
             labels = labels.to(device)
+            
+            # Start Compute Timing
+            compute_start = time.time()
 
             optimizer.zero_grad()
 
@@ -187,13 +201,30 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
 
             loss.backward()
             optimizer.step()
+            
+            # Measure Compute Time
+            compute_time = time.time() - compute_start
+            total_compute_time += compute_time
 
             running_loss += loss.item() * inputs.size(0)
             running_corrects += torch.sum(preds == labels.data)
+            
+            # Reset end time
+            end_time = time.time()
 
         epoch_loss = running_loss / len(train_dataset)
         epoch_acc = running_corrects.double() / len(train_dataset)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
+
+        # Timing Analysis
+        avg_data_time = total_data_time / num_batches
+        avg_compute_time = total_compute_time / num_batches
+        print(f"   Time (Avg/Batch): Data: {avg_data_time*1000:.1f}ms | Compute: {avg_compute_time*1000:.1f}ms")
+        
+        if avg_data_time > avg_compute_time:
+             print("   ⚠️  Bottleneck: DATA LOADING (CPU/Disk). Increase num_workers or batch_size.")
+        else:
+             print("   ✅ Bottleneck: COMPUTE (GPU). This is ideal.")
 
         # GPU Monitoring
         if device.type == 'cuda':
