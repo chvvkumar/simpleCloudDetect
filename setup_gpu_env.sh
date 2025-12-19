@@ -35,9 +35,8 @@ source $VENV_NAME/bin/activate
 echo -e "${GREEN}Upgrading pip...${NC}"
 pip install --upgrade pip
 
-# 6. Install tf-nightly (REQUIRED for RTX 50-series/Compute Capability 12.0)
+# 6. Install tf-nightly (REQUIRED for RTX 50-series)
 echo -e "${GREEN}Installing tf-nightly[and-cuda]...${NC}"
-# We uninstall standard tensorflow first just in case, then install nightly
 pip uninstall -y tensorflow
 pip install "tf-nightly[and-cuda]" matplotlib numpy
 
@@ -49,11 +48,16 @@ cat > run_with_gpu.sh << EOF
 # Source the venv
 source $(pwd)/$VENV_NAME/bin/activate
 
-# Add all nvidia pip-installed libs to LD_LIBRARY_PATH
+# --- CRITICAL: Add ALL NVIDIA Library Paths ---
+# Added: cuda_nvrtc (Required for runtime compilation)
+# Added: /usr/lib/wsl/lib (Required for WSL2 libcuda.so)
+
+export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/usr/lib/wsl/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cudnn/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cublas/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cuda_cupti/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cuda_nvcc/lib
+export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cuda_nvrtc/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cuda_runtime/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/cufft/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/curand/lib
@@ -62,10 +66,9 @@ export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-pack
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/nccl/lib
 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$(pwd)/$VENV_NAME/lib/python*/site-packages/nvidia/nvjitlink/lib
 
-# --- FIX FOR RTX 50-SERIES JIT COMPILATION ---
-# Disable XLA if errors persist, but Nightly should handle it. 
-# Uncomment the line below if you still see PTX errors with Nightly:
-# export TF_XLA_FLAGS="--tf_xla_enable_xla_devices=false"
+# Reduce verbosity
+export TF_CPP_MIN_LOG_LEVEL=2
+export TF_ENABLE_ONEDNN_OPTS=0
 
 # Execute the command passed to this script
 exec "\$@"
@@ -73,7 +76,6 @@ EOF
 
 chmod +x run_with_gpu.sh
 
-echo -e "${GREEN}Setup Complete! (Nightly Build)${NC}"
-echo -e "${YELLOW}IMPORTANT: Ensure your Windows NVIDIA Driver is fully updated via GeForce Experience.${NC}"
-echo -e "To train, run this command:"
-echo -e "${GREEN}./run_with_gpu.sh python train.py --data_dir /mnt/f/MLClouds_incoming/resized/${NC}"
+echo -e "${GREEN}Setup Complete!${NC}"
+echo -e "${YELLOW}IMPORTANT: We fixed the missing NVRTC path. Run the command below to test.${NC}"
+echo -e "${GREEN}./run_with_gpu.sh python -c \"import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))\"${NC}"
