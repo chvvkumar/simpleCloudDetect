@@ -16,9 +16,11 @@ python3 -m venv venv_pytorch
 source venv_pytorch/bin/activate
 
 # 5. Install PyTorch with CUDA Support (for NVIDIA GPU)
-# Note: Assumes CUDA drivers are installed on Windows host
-echo "Installing PyTorch (CUDA 12.4 nightly)..."
-pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
+# We install ONLY torchvision here from the nightly channel.
+# It will automatically pull the specific version of torch it was built against, 
+# preventing the version mismatch error you saw earlier.
+echo "Installing PyTorch Nightly (CUDA 12.x)..."
+pip install --pre torchvision --index-url https://download.pytorch.org/whl/nightly/cu124
 
 # 6. Install Other Utilities
 echo "Installing utilities..."
