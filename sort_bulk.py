@@ -10,7 +10,7 @@ import math
 import time
 
 # --- Configuration ---
-MODEL_PATH = 'model_clean.keras'
+MODEL_PATH = 'model.keras'
 LABELS_PATH = 'labels.txt'
 IMG_SIZE = (260, 260) 
 BATCH_SIZE = 64  
