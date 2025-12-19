@@ -1,3 +1,5 @@
+import gpu_bootstrapper
+gpu_bootstrapper.load_libs()
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
