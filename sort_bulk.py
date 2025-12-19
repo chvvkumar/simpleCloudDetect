@@ -38,19 +38,14 @@ def create_class_folders(base_dir, class_names):
     return paths
 
 def get_unique_path(dest_folder, filename):
-    """
-    If file exists in destination, append a counter: image.jpg -> image_1.jpg
-    """
     base, ext = os.path.splitext(filename)
     counter = 1
     new_filename = filename
     full_path = os.path.join(dest_folder, new_filename)
-    
     while os.path.exists(full_path):
         new_filename = f"{base}_{counter}{ext}"
         full_path = os.path.join(dest_folder, new_filename)
         counter += 1
-        
     return full_path
 
 def sort_images(source_dir, output_dir, confidence_threshold=70.0):
@@ -64,22 +59,21 @@ def sort_images(source_dir, output_dir, confidence_threshold=70.0):
     class_names = load_labels()
     dest_folders = create_class_folders(output_dir, class_names)
     
-    # --- MODIFIED: RECURSIVE SCAN ---
+    # Recursively find files
     print(f"📂 Scanning {source_dir} recursively...")
-    valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+    valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff')
     all_files_full_paths = []
     
-    # os.walk automatically dives into all subfolders (e.g. 20241230, 20241231)
     for root, dirs, files in os.walk(source_dir):
         for f in files:
             if f.lower().endswith(valid_exts):
-                # Store the FULL path so we can locate it later
                 all_files_full_paths.append(os.path.join(root, f))
     
     total_files = len(all_files_full_paths)
-    print(f"📂 Found {total_files} images in total.")
+    print(f"📂 Found {total_files} images.")
     print(f"⚡ Processing in batches of {BATCH_SIZE}...")
-    print("-" * 50)
+    print(f"🔧 Using 'bicubic' interpolation for high-res downscaling.")
+    print("-" * 60)
 
     num_batches = math.ceil(total_files / BATCH_SIZE)
     moved_count = 0
@@ -90,15 +84,15 @@ def sort_images(source_dir, output_dir, confidence_threshold=70.0):
         batch_images = []
         valid_batch_paths = []
 
-        # Load images
         for src_path in batch_paths:
             try:
-                img = image.load_img(src_path, target_size=IMG_SIZE)
+                # [FIX] Use bicubic interpolation to prevent aliasing on large images
+                img = image.load_img(src_path, target_size=IMG_SIZE, interpolation='bicubic')
                 img_arr = image.img_to_array(img)
                 batch_images.append(img_arr)
                 valid_batch_paths.append(src_path)
             except Exception as e:
-                print(f"⚠️ Corrupt file skipped: {src_path}")
+                print(f"⚠️ Corrupt/Unreadable: {os.path.basename(src_path)}")
 
         if not batch_images:
             continue
@@ -107,43 +101,41 @@ def sort_images(source_dir, output_dir, confidence_threshold=70.0):
         batch_arr = np.array(batch_images)
         predictions = model.predict_on_batch(batch_arr)
 
-        # Move Files
         for i, src_path in enumerate(valid_batch_paths):
             scores = tf.nn.softmax(predictions[i])
             pred_idx = np.argmax(scores)
             confidence = 100 * np.max(scores)
             
-            # Use original filename
             filename = os.path.basename(src_path)
-            
+            predicted_label = class_names[pred_idx]
+
             if confidence >= confidence_threshold:
-                target_folder = dest_folders[class_names[pred_idx]]
-            else:
-                target_folder = dest_folders["_Uncertain"]
-            
-            # Generate unique destination path to prevent overwrites
-            dst_path = get_unique_path(target_folder, filename)
-            
-            try:
+                target_folder = dest_folders[predicted_label]
+                dst_path = get_unique_path(target_folder, filename)
                 shutil.move(src_path, dst_path)
                 moved_count += 1
-            except Exception as e:
-                print(f"❌ Error moving {filename}: {e}")
+            else:
+                # [DEBUG] Print why it failed
+                print(f"⚠️ Low Conf ({confidence:.1f}%): {filename} -> Thought it was {predicted_label}")
+                
+                target_folder = dest_folders["_Uncertain"]
+                dst_path = get_unique_path(target_folder, filename)
+                shutil.move(src_path, dst_path)
 
-        # Progress
         if b % 5 == 0:
-            print(f"   Batch {b+1}/{num_batches} complete. ({moved_count} moved)")
+            print(f"   Batch {b+1}/{num_batches} complete. ({moved_count} sorted successfully)")
 
     duration = (time.time() - start_time) / 60
-    print("-" * 50)
+    print("-" * 60)
     print(f"✅ Sorting Complete!")
     print(f"⏱️ Time: {duration:.2f} minutes")
-    print(f"📦 Total Images Sorted: {moved_count}")
+    print(f"📦 Successfully Sorted: {moved_count}/{total_files}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, required=True, help='Root folder containing dated subfolders')
-    parser.add_argument('--output', type=str, required=True, help='Root folder to create class subfolders in')
+    parser.add_argument('--source', type=str, required=True, help='Source folder')
+    parser.add_argument('--output', type=str, required=True, help='Output folder')
+    # Lower default threshold slightly to be more forgiving
     parser.add_argument('--conf', type=float, default=60.0, help='Confidence threshold')
     args = parser.parse_args()
     
