@@ -1,0 +1,39 @@
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Model files
+*.h5
+*.keras
+model.keras
+keras_model.h5
+
+# Training artifacts
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.old
+*.backup
+*.bak
+
+# Environment variables
+.env
