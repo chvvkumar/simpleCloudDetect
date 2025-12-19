@@ -122,10 +122,18 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     val_dataset = CloudDataset(val_paths, val_labels, transform=val_transforms)
 
     # Pin_memory=True speeds up CPU->GPU transfer
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
-                              num_workers=num_workers, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, 
-                            num_workers=num_workers, pin_memory=True)
+    # OPTIMIZATION: persistent_workers and prefetch_factor allow workers to buffer data
+    # continuously, masking the slow file I/O from WSL2 accessing Windows drives.
+    loader_kwargs = {
+        'batch_size': batch_size,
+        'num_workers': num_workers,
+        'pin_memory': True,
+        'persistent_workers': True if num_workers > 0 else False,
+        'prefetch_factor': 4 if num_workers > 0 else None
+    }
+    
+    train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
 
     # 3. Model Setup (Architecture Selection)
     print(f"🏗️  Initializing {arch}...")
