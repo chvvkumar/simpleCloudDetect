@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import tensorflow as tf
+from tensorflow.keras import mixed_precision # Added for mixed precision
 from pathlib import Path
 
 # --- Configuration ---
@@ -26,12 +27,17 @@ def main():
     args = parse_args()
     data_dir = Path(args.data_dir)
 
-    # 1. GPU Check
+    # 1. GPU & Mixed Precision Setup
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
         print(f"✅ Found {len(gpus)} GPU(s). Training will be accelerated.")
+        # Enable Mixed Precision (FP16)
+        # This dramatically speeds up training on RTX cards and reduces VRAM usage
+        policy = mixed_precision.Policy('mixed_float16')
+        mixed_precision.set_global_policy(policy)
+        print(f"✅ Mixed Precision enabled: {policy.compute_dtype}")
     else:
-        print("⚠️ No GPU found. Training will use CPU.")
+        print("⚠️ No GPU found. Training will use CPU (slow).")
 
     # 2. Load Data
     if not data_dir.exists():
@@ -78,7 +84,6 @@ def main():
     ])
 
     # 5. Create Model (MobileNetV2 Transfer Learning)
-    # Note: MobileNetV2 specific preprocessing is included in the model pipeline
     preprocess_input = tf.keras.applications.mobilenet_v2.preprocess_input
 
     base_model = tf.keras.applications.MobileNetV2(
@@ -90,11 +95,16 @@ def main():
 
     inputs = tf.keras.Input(shape=IMG_SIZE + (3,))
     x = data_augmentation(inputs)
-    x = preprocess_input(x)  # Scales inputs appropriately
+    x = preprocess_input(x)
     x = base_model(x, training=False)
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     x = tf.keras.layers.Dropout(0.2)(x)
-    outputs = tf.keras.layers.Dense(len(class_names), activation='softmax')(x)
+    
+    # --- MODIFIED OUTPUT FOR MIXED PRECISION ---
+    # We remove the activation from the Dense layer and add it separately.
+    # The output activation MUST be float32 for numeric stability.
+    x = tf.keras.layers.Dense(len(class_names))(x) 
+    outputs = tf.keras.layers.Activation('softmax', dtype='float32', name='predictions')(x)
 
     model = tf.keras.Model(inputs, outputs)
 
