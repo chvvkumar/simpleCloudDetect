@@ -1,6 +1,7 @@
-0 Clear
-1 Mostly Cloudy
-2 Overcast
-3 Rain
-4 Snow
-5 Wisps of clouds
+Clear
+Lightning
+Meteors
+Overcast
+Partly Cloudy
+Rain
+Snow
