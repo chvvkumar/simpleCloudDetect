@@ -10,12 +10,6 @@ __pycache__/
 *$py.class
 *.so
 
-# Model files
-*.h5
-*.keras
-model.keras
-keras_model.h5
-
 # Training artifacts
 *.log
 
