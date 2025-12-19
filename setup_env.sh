@@ -16,18 +16,11 @@ python3 -m venv venv_pytorch
 source venv_pytorch/bin/activate
 
 # 5. Install PyTorch with CUDA Support (for NVIDIA GPU)
-# We use a two-step process to bypass nightly version mismatches:
-# 1. Install the latest Torch (March 10+ build) which supports your RTX 5070 Ti.
-echo "Installing PyTorch Nightly (Step 1: Torch)..."
-pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu124
-
-# 2. Install Torchvision without checking dependencies.
-# This bypasses the error where torchvision demands an older, missing version of torch.
-echo "Installing PyTorch Nightly (Step 2: Torchvision)..."
-pip install --pre torchvision --index-url https://download.pytorch.org/whl/nightly/cu124 --no-deps
+# Note: Assumes CUDA drivers are installed on Windows host
+echo "Installing PyTorch (CUDA 13.0)..."
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 
 # 6. Install Other Utilities
-# Note: We explicitly install numpy and pillow here since we skipped deps for torchvision above
 echo "Installing utilities..."
 pip install onnx onnxruntime pillow numpy requests
 
