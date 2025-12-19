@@ -71,8 +71,8 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         print(f"   Architecture: {arch}")
         # Reset peak memory stats at start
         torch.cuda.reset_peak_memory_stats()
-        # Optimization for consistent input sizes
-        torch.backends.cudnn.benchmark = True
+        # DISABLE benchmark to prevent 'FIND was unable to find an engine' on newer GPUs/High batch sizes
+        torch.backends.cudnn.benchmark = False
 
     # 2. Prepare Data (Find -> Split -> Transform)
     if not os.path.exists(data_dir):
@@ -224,6 +224,10 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
                 if device.type == 'cuda':
                     print(f"   Peak Memory reached: {torch.cuda.max_memory_allocated(0)/1024**3:.2f}GB")
                     torch.cuda.empty_cache()
+                return
+            elif "unable to find an engine" in str(e):
+                print(f"\n🛑 CuDNN Benchmark Error! Batch size {batch_size} is causing convolution algorithm selection to fail.")
+                print("   Try reducing the batch size to 256.")
                 return
             else:
                 raise e
