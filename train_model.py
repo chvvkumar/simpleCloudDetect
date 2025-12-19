@@ -58,17 +58,20 @@ def find_images_recursively(root_dir):
 # Main Training Function
 # ---------------------------------------------------------
 def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt', 
-                epochs=50, batch_size=1024, patience=7, num_workers=8, arch='mobilenet_v3_large'):
+                epochs=50, batch_size=256, patience=7, num_workers=8, arch='mobilenet_v3_large'):
     
     # 1. Setup Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🚀 Device: {device}")
+    
     if device.type == 'cuda':
         print(f"   GPU: {torch.cuda.get_device_name(0)}")
         print(f"   Batch Size: {batch_size}")
         print(f"   Architecture: {arch}")
         # Initial Memory Check
         print(f"   Initial Memory: {torch.cuda.memory_allocated(0)/1024**3:.2f}GB allocated")
+        # Optimization for consistent input sizes
+        torch.backends.cudnn.benchmark = True
 
     # 2. Prepare Data (Find -> Split -> Transform)
     if not os.path.exists(data_dir):
@@ -260,7 +263,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='/mnt/f/MLClouds_incoming/resized/', help='Path to dataset')
     parser.add_argument('--epochs', type=int, default=50, help='Max epochs (will likely stop early)')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size (Higher = Better GPU Usage)')
+    parser.add_argument('--batch_size', type=int, default=256, help='Batch size (Higher = Better GPU Usage)')
     parser.add_argument('--patience', type=int, default=7, help='Epochs to wait before early stopping')
     parser.add_argument('--workers', type=int, default=8, help='Number of data loader workers')
     parser.add_argument('--arch', type=str, default='mobilenet_v3_large', 
