@@ -7,6 +7,7 @@ import os
 import tensorflow as tf
 from tensorflow.keras import mixed_precision # Added for mixed precision
 from pathlib import Path
+import time
 
 # --- Configuration ---
 IMG_SIZE = (224, 224)       # Standard size for MobileNetV2
@@ -116,11 +117,13 @@ def main():
 
     # 6. Initial Training
     print("--- Starting Phase 1: Training Head ---")
+    start_time = time.time()
     history = model.fit(
         train_ds,
         epochs=EPOCHS_INITIAL,
         validation_data=val_ds
     )
+    print(f"Phase 1 completed in {time.time() - start_time:.2f} seconds.")
 
     # 7. Fine-Tuning
     print("--- Starting Phase 2: Fine-Tuning Base ---")
@@ -144,6 +147,13 @@ def main():
         initial_epoch=history.epoch[-1],
         validation_data=val_ds
     )
+    end_time = time.time()
+    total_duration = end_time - start_time
+    # Convert to minutes and seconds
+    minutes = int(total_duration // 60)
+    seconds = int(total_duration % 60)
+    print(f"Phase 2 completed in {total_duration - (end_time - start_time):.2f} seconds.")
+    print(f"⏱️ Total Training Time: {minutes}m {seconds}s")
 
     # 8. Save Artifacts
     print(f"Saving model to {MODEL_SAVE_PATH}...")
