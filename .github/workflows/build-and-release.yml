@@ -400,7 +400,7 @@ jobs:
           
           # Build the prompt
           read -r -d '' PROMPT << 'EOF'
-          You are a code review assistant. Analyze the following pull request and provide a comprehensive summary.
+          You are a code review assistant. Analyze the following pull request and provide a summary.
 
           **IMPORTANT:** Focus ONLY on the actual code changes listed below. Do NOT mention or summarize any GitHub Actions workflow files (.github/workflows/) as those have been filtered out.
 
@@ -415,12 +415,11 @@ jobs:
           %FILES%
 
           ## Your Task
-          Provide a well-structured response with these sections:
+          Generate a response in the following format:
 
-          ### PR Title (on a single line, no markdown formatting)
-          Generate a concise, descriptive PR title (50-70 characters max) that summarizes the main purpose of this PR.
-          
-          Output format: Just the title text, nothing else on this line. Do NOT include any emojis.
+          First, provide a concise PR title (50-70 characters) summarizing the main purpose. Do NOT include emojis. Put this on the very first line of your response with no prefix or label.
+
+          Then add a blank line and provide:
 
           ### 📋 Overview
           Write 2-3 sentences describing what this PR accomplishes overall.
@@ -436,8 +435,6 @@ jobs:
           - **Configuration**: Config file changes
 
           Only include categories that apply. Use bullet points for each change.
-
-          Format everything in clean markdown.
           EOF
           
           # Replace placeholders (remove jq quotes)
@@ -501,32 +498,26 @@ jobs:
             const timestamp = new Date().toISOString();
             
             // Extract title and body from the summary
+            // Title is on the first line, then blank line, then the rest
             const lines = summaryContent.split('\n');
             let generatedTitle = '';
-            let captureTitle = false;
             let summaryBody = [];
-            let inBody = false;
             
+            // First non-empty line is the title
+            let foundTitle = false;
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
               
-              // Look for the PR Title section header
-              if (line.trim() === '### PR Title (on a single line, no markdown formatting)') {
-                captureTitle = true;
-                continue;
-              }
-              
-              // Capture the title (first non-empty line after the header)
-              if (captureTitle && line.trim() && !line.startsWith('#')) {
+              if (!foundTitle && line.trim() && !line.startsWith('#')) {
                 generatedTitle = line.trim();
-                captureTitle = false;
+                foundTitle = true;
                 continue;
               }
               
-              // Start capturing body from Overview section onwards
-              if (line.includes('### 📋 Overview') || inBody) {
-                inBody = true;
-                summaryBody.push(line);
+              // After title, start collecting body from first header
+              if (foundTitle && line.startsWith('#')) {
+                summaryBody = lines.slice(i);
+                break;
               }
             }
             
