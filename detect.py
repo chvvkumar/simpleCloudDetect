@@ -270,8 +270,11 @@ class CloudDetector:
         
         # Normalize (ImageNet stats)
         img_data = np.array(image).astype(np.float32) / 255.0
-        mean = np.array([0.485, 0.456, 0.406])
-        std = np.array([0.229, 0.224, 0.225])
+        
+        # --- FIX: Explicitly use float32 for mean/std to prevent auto-promoting to double ---
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        
         img_data = (img_data - mean) / std
         
         # Transpose to (Batch, Channel, Height, Width)
