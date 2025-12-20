@@ -213,7 +213,7 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
 
     # Transforms
     train_transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((300, 300)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(), 
         transforms.RandomRotation(20),
@@ -223,7 +223,7 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     ])
 
     val_transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((300, 300)),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
