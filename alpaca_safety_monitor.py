@@ -709,9 +709,20 @@ def get_available_cloud_conditions() -> list:
     """Load cloud conditions from labels file"""
     try:
         label_path = os.getenv('LABEL_PATH', 'labels.txt')
+        conditions = []
         with open(label_path, 'r') as f:
-            # Parse labels like "0 Clear" and extract just the class name
-            return [line.strip().split(' ', 1)[1] for line in f.readlines()]
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                
+                # Check for "0 Clear" format vs "Clear" format
+                parts = line.split(' ', 1)
+                if len(parts) > 1 and parts[0].isdigit():
+                    conditions.append(parts[1])
+                else:
+                    conditions.append(line)
+        
+        return conditions
     except Exception as e:
         logger.error(f"Failed to load labels: {e}")
         # Fallback to hardcoded list
