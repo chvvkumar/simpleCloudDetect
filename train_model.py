@@ -57,12 +57,15 @@ def create_dali_pipeline(file_list_path, is_training):
         name="Reader"
     )
     
-    # Decode directly to GPU
-    images = fn.decoders.image(jpegs, device="mixed", output_type=types.RGB)
+# 1. Decode on CPU (Fixes WSL2 crash)
+    images = fn.decoders.image(jpegs, device="cpu", output_type=types.RGB)
     
-    # Resize to 300x300
+    # 2. Move to GPU explicitly
+    images = images.gpu()
+    
+    # 3. Resize on GPU (Fast)
     images = fn.resize(images, resize_x=300, resize_y=300)
-
+    
     if is_training:
         images = fn.flip(images, 
                          horizontal=fn.random.coin_flip(probability=0.5),
