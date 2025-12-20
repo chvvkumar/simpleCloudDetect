@@ -1,4 +1,5 @@
-# SimpleCloudDetect
+<div align="center">
+<h1>☁️ Simple<span style="color: #22d3ee;">Cloud</span>Detect</h1>
 
 A Machine Learning-based cloud detection system for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor integration.
 
@@ -8,6 +9,7 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue?style=flat&logo=python&logoColor=white)](https://www.python.org/) [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?style=flat&logo=tensorflow)](https://www.tensorflow.org/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Compatible-blue?style=flat&logo=home-assistant)](https://www.home-assistant.io/) [![ASCOM](https://img.shields.io/badge/ASCOM-Alpaca-green?style=flat)](https://ascom-standards.org/)
+</div>
 
 ---
 
