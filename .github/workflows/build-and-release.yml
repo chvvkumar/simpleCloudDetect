@@ -7,13 +7,21 @@ on:
       - "dev"
     paths-ignore:
       - '*.md'
+      - '**/*.md'
       - 'images/**'
+      - 'readme.md'
+      - 'README.md'
+      - 'ALPACA_README.md'
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [ main, dev ]
     paths-ignore:
       - '*.md'
+      - '**/*.md'
       - 'images/**'
+      - 'readme.md'
+      - 'README.md'
+      - 'ALPACA_README.md'
 
 jobs:
   build:
@@ -495,23 +503,29 @@ jobs:
             // Extract title and body from the summary
             const lines = summaryContent.split('\n');
             let generatedTitle = '';
+            let captureTitle = false;
             let summaryBody = [];
             let inBody = false;
             
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
-              if (line.includes('### PR Title')) {
-                // Next non-empty line is the title
-                for (let j = i + 1; j < lines.length; j++) {
-                  if (lines[j].trim() && !lines[j].startsWith('#')) {
-                    generatedTitle = lines[j].trim();
-                    break;
-                  }
-                }
-              } else if (line.includes('### 📋 Overview')) {
+              
+              // Look for the PR Title section header
+              if (line.trim() === '### PR Title (on a single line, no markdown formatting)') {
+                captureTitle = true;
+                continue;
+              }
+              
+              // Capture the title (first non-empty line after the header)
+              if (captureTitle && line.trim() && !line.startsWith('#')) {
+                generatedTitle = line.trim();
+                captureTitle = false;
+                continue;
+              }
+              
+              // Start capturing body from Overview section onwards
+              if (line.includes('### 📋 Overview') || inBody) {
                 inBody = true;
-                summaryBody.push(line);
-              } else if (inBody) {
                 summaryBody.push(line);
               }
             }
@@ -541,7 +555,6 @@ jobs:
                 const secondMatch = endPattern.exec(pr.body);
                 if (secondMatch) {
                   // Remove old summary and add new one
-                  const beforeSummary = pr.body.substring(0, markerIndex);
                   const afterSummary = pr.body.substring(secondMatch.index + 5);
                   newBody = summarySection + afterSummary;
                 } else {
@@ -558,6 +571,9 @@ jobs:
             // Use generated title if available, otherwise keep original
             const finalTitle = generatedTitle || pr.title;
             
+            console.log(`Extracted title: "${generatedTitle}"`);
+            console.log(`Final title: "${finalTitle}"`);
+            
             // Update the PR
             await github.rest.pulls.update({
               owner: context.repo.owner,
@@ -568,5 +584,4 @@ jobs:
             });
             
             console.log(`✅ Updated PR #${context.issue.number}`);
-            console.log(`Title: ${finalTitle}`);
 
