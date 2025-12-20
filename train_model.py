@@ -57,15 +57,17 @@ def create_dali_pipeline(file_list_path, is_training):
         name="Reader"
     )
     
-# 1. Decode on CPU (Fixes WSL2 crash)
+    # 1. Decode on CPU (Required for WSL2 compatibility)
     images = fn.decoders.image(jpegs, device="cpu", output_type=types.RGB)
     
-    # 2. Move to GPU explicitly
-    images = images.gpu()
-    
-    # 3. Resize on GPU (Fast)
+    # 2. Resize on CPU (Ensures we send a uniform, dense tensor to GPU)
+    #    This prevents the "IsDenseTensor" crash.
     images = fn.resize(images, resize_x=300, resize_y=300)
     
+    # 3. Move to GPU (Now efficiently transfers one big contiguous block)
+    images = images.gpu()
+
+    # 4. Augmentations on GPU
     if is_training:
         images = fn.flip(images, 
                          horizontal=fn.random.coin_flip(probability=0.5),
@@ -75,7 +77,7 @@ def create_dali_pipeline(file_list_path, is_training):
                                 brightness=fn.random.uniform(range=(0.8, 1.2)),
                                 contrast=fn.random.uniform(range=(0.8, 1.2)))
 
-    # Normalize (ImageNet mean/std)
+    # 5. Normalize on GPU
     images = fn.crop_mirror_normalize(
         images,
         dtype=types.FLOAT,
