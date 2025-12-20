@@ -141,3 +141,141 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     combined = list(zip(all_paths, all_labels))
     import random
     random.shuffle(combined)
+    all_paths, all_labels = zip(*combined)
+    
+    split_idx = int(0.8 * len(all_paths))
+    train_ds = CloudDataset(all_paths[:split_idx], all_labels[:split_idx], cache_ram=cache_ram)
+    val_ds = CloudDataset(all_paths[split_idx:], all_labels[split_idx:], cache_ram=cache_ram)
+    
+    # Fast Loader (Main thread only needed if cached)
+    workers = 0 if cache_ram else 8
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True)
+
+    print(f"📂 Data Split: {len(train_ds)} Training, {len(val_ds)} Validation")
+    print(f"🏷️  Classes: {class_names}")
+
+    # --- Model Setup ---
+    print(f"🏗️  Initializing {arch}...")
+    if arch == 'mobilenet_v3_large':
+        model = models.mobilenet_v3_large(weights='DEFAULT')
+        model.classifier[3] = nn.Linear(model.classifier[3].in_features, len(class_names))
+    elif arch == 'resnet18':
+        model = models.resnet18(weights='DEFAULT')
+        model.fc = nn.Linear(model.fc.in_features, len(class_names))
+    
+    model = model.to(device)
+    
+    # Initialize GPU Augmenter
+    gpu_aug = GPUAugment().to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2)
+
+    best_acc = 0.0
+    best_loss = float('inf')
+    epochs_no_improve = 0
+    actual_epochs = 0
+    
+    # Keep track of best weights
+    best_model_wts = copy.deepcopy(model.state_dict())
+
+    print("\n🔥 Starting Training Loop (GPU Accelerated)...")
+    
+    try:
+        for epoch in range(epochs):
+            actual_epochs += 1
+            print(f"\nEpoch {epoch+1}/{epochs}")
+            print("-" * 10)
+
+            for phase in ['train', 'val']:
+                if phase == 'train':
+                    model.train()
+                else:
+                    model.eval()
+
+                running_loss = 0.0
+                running_corrects = 0
+                total_samples = 0
+                start_time = time.time()
+                
+                loader = train_loader if phase == 'train' else val_loader
+                
+                for inputs, labels in loader:
+                    # 1. Move raw resized tensors to GPU
+                    inputs = inputs.to(device, non_blocking=True)
+                    labels = labels.to(device, non_blocking=True)
+
+                    # 2. Apply Augmentations ON GPU
+                    #    (Replaces the slow CPU bottleneck)
+                    inputs = gpu_aug(inputs, is_training=(phase=='train'))
+
+                    optimizer.zero_grad()
+                    
+                    with torch.set_grad_enabled(phase == 'train'):
+                        outputs = model(inputs)
+                        _, preds = torch.max(outputs, 1)
+                        loss = criterion(outputs, labels)
+
+                        if phase == 'train':
+                            loss.backward()
+                            optimizer.step()
+
+                    running_loss += loss.item() * inputs.size(0)
+                    running_corrects += torch.sum(preds == labels.data)
+                    total_samples += inputs.size(0)
+
+                epoch_loss = running_loss / total_samples
+                epoch_acc = running_corrects.double() / total_samples
+                epoch_time = time.time() - start_time
+                
+                print(f"{phase.capitalize()} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f} | Time: {epoch_time:.1f}s")
+                
+                if phase == 'train':
+                    print(f"   🚀 Speed: {total_samples/epoch_time:.0f} images/sec")
+
+                if phase == 'val':
+                    scheduler.step(epoch_loss)
+                    if epoch_loss < best_loss:
+                        best_loss = epoch_loss
+                        best_acc = epoch_acc
+                        best_model_wts = copy.deepcopy(model.state_dict())
+                        epochs_no_improve = 0
+                        print("   ⭐ New Best Model Saved!")
+                    else:
+                        epochs_no_improve += 1
+
+            if epochs_no_improve >= patience:
+                print("🛑 Early stopping triggered!")
+                break
+
+    except KeyboardInterrupt:
+        print("\n🛑 Training interrupted.")
+
+    print("\n📦 Exporting BEST model to ONNX...")
+    model.load_state_dict(best_model_wts)
+    model.eval()
+    
+    # Trace with a dummy input
+    dummy = torch.randn(1, 3, 300, 300, device=device)
+    torch.onnx.export(model, dummy, output_model, 
+                      input_names=['input'], output_names=['output'],
+                      opset_version=18)
+    
+    with open(output_labels, 'w') as f:
+        for name in class_names:
+            f.write(f"{name}\n")
+    
+    print(f"🏆 Done! Best Accuracy: {best_acc:.4f}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str, default='dataset')
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--arch', type=str, default='mobilenet_v3_large')
+    args = parser.parse_args()
+    
+    # RAM Cache is enabled by default for speed
+    train_model(args.data_dir, epochs=args.epochs, batch_size=args.batch_size, arch=args.arch, cache_ram=True)
