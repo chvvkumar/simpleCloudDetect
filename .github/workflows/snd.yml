@@ -29,27 +29,6 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
-      - name: Cache pip packages
-        # Skip cache for self-hosted runners (files persist locally)
-        if: ${{ runner.name != 'git01' }}
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            /root/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-pytorch-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-pytorch-
-            ${{ runner.os }}-buildx-
-      
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -60,6 +39,7 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           platforms: linux/amd64,linux/arm64
       
+      # Prevent cache from growing indefinitely on self-hosted runner
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
