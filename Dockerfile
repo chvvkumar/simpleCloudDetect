@@ -23,10 +23,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY alpaca_safety_monitor.py .
 COPY detect.py .
 COPY train_model.py .
-COPY labels.txt .
-# Ensure model is copied. If you don't commit model.onnx to git, 
-# you should mount it as a volume at runtime, but copying serves as a fallback.
-COPY model.onnx .
+
+# Copy model and labels if they exist (will be mounted as volumes in production)
+COPY --chown=root:root labels.txt* ./
+COPY --chown=root:root model.onnx* ./
 
 # Expose the ASCOM Alpaca port
 EXPOSE 11111
