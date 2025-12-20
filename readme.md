@@ -2,7 +2,7 @@
 
 A Machine Learning-based cloud detection system for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor integration.
 
-[![main](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/main.yml) [![dev](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml/badge.svg)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/dev.yml) 
+[![Main Build](https://img.shields.io/github/actions/workflow/status/chvvkumar/simpleCloudDetect/build-and-release.yml?branch=main&label=main&logo=github)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/build-and-release.yml) [![Dev Build](https://img.shields.io/github/actions/workflow/status/chvvkumar/simpleCloudDetect/build-and-release.yml?branch=dev&label=dev&logo=github)](https://github.com/chvvkumar/simpleCloudDetect/actions/workflows/build-and-release.yml?query=branch%3Adev)
 
 [![Docker Image Size (latest)](https://img.shields.io/docker/image-size/chvvkumar/simpleclouddetect/latest?style=flat&logo=docker&logoSize=auto)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) [![Docker Pulls](https://img.shields.io/docker/pulls/chvvkumar/simpleclouddetect?style=flat&logo=docker&label=Pulls)](https://hub.docker.com/r/chvvkumar/simpleclouddetect) 
 
