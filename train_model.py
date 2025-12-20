@@ -21,7 +21,7 @@ class CloudDataset(Dataset):
         self.cache_ram = cache_ram
         self.cached_images = []
         
-        # Resize only. We defer "ToTensor" to keep data as uint8 [0-255]
+        # Resize only. Defer ToTensor to keep data as uint8
         self.resize_transform = transforms.Resize((300, 300))
 
         if self.cache_ram:
@@ -29,16 +29,13 @@ class CloudDataset(Dataset):
             for idx, path in enumerate(file_list):
                 try:
                     with Image.open(path).convert('RGB') as img:
-                        # 1. Resize
                         img = self.resize_transform(img)
-                        # 2. Store as Uint8 Tensor [0-255] (Saves 4x RAM)
-                        #    Shape: (C, H, W)
+                        # Store as Uint8 [0-255] (C, H, W)
                         np_img = np.array(img).transpose(2, 0, 1)
                         tensor = torch.from_numpy(np_img) 
                         self.cached_images.append(tensor)
                 except Exception as e:
                     print(f"⚠️ Warning: Could not load {path}: {e}")
-                    # Placeholder (Black image)
                     self.cached_images.append(torch.zeros(3, 300, 300, dtype=torch.uint8))
                     
                 if (idx + 1) % 5000 == 0:
@@ -52,11 +49,9 @@ class CloudDataset(Dataset):
         label = self.labels[idx]
         
         if self.cache_ram:
-            # Retrieve uint8 tensor -> Convert to float32 [0.0, 1.0]
-            # This is extremely fast and happens just before batching
+            # Convert Uint8 -> Float32 [0.0, 1.0] on the fly
             image = self.cached_images[idx].float() / 255.0
         else:
-            # Fallback disk read
             path = self.file_list[idx]
             try:
                 with Image.open(path).convert('RGB') as img:
@@ -73,36 +68,33 @@ class CloudDataset(Dataset):
 class GPUAugment(nn.Module):
     def __init__(self):
         super().__init__()
-        # These run on the GPU batch [B, 3, 300, 300]
+        # GPU-accelerated transforms
         self.transforms = nn.Sequential(
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             transforms.RandomRotation(20),
-            # Normalize (ImageNet stats)
             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
                                  std=[0.229, 0.224, 0.225])
         )
-        
         self.normalize_only = transforms.Normalize(
             mean=[0.485, 0.456, 0.406], 
             std=[0.229, 0.224, 0.225]
         )
 
     def forward(self, x, is_training=True):
+        # Input x is expected to be [0.0, 1.0]
         if is_training:
             return self.transforms(x)
         else:
             return self.normalize_only(x)
 
 # ---------------------------------------------------------
-# 3. Helper: Find Images
+# 3. Helpers
 # ---------------------------------------------------------
 def find_images_recursively(root_dir):
     classes = sorted([d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))])
     class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
-    
-    images = []
-    labels = []
+    images, labels = [], []
     
     print(f"🔍 Scanning '{root_dir}'...")
     for cls_name in classes:
@@ -116,7 +108,7 @@ def find_images_recursively(root_dir):
     return images, labels, classes
 
 # ---------------------------------------------------------
-# 4. Main Training Function
+# 4. Main Training Function (With AMP)
 # ---------------------------------------------------------
 def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt', 
                 epochs=50, batch_size=256, patience=7, arch='mobilenet_v3_large', cache_ram=True):
@@ -127,15 +119,12 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     if torch.cuda.is_available():
         print(f"   GPU: {torch.cuda.get_device_name(0)}")
         
-    # --- Data Setup ---
     if not os.path.exists(data_dir):
         print("❌ Dataset not found.")
         return
 
     all_paths, all_labels, class_names = find_images_recursively(data_dir)
-    if not all_paths:
-        print("❌ No images found in dataset directory!")
-        return
+    if not all_paths: return
 
     # Shuffle
     combined = list(zip(all_paths, all_labels))
@@ -147,7 +136,6 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     train_ds = CloudDataset(all_paths[:split_idx], all_labels[:split_idx], cache_ram=cache_ram)
     val_ds = CloudDataset(all_paths[split_idx:], all_labels[split_idx:], cache_ram=cache_ram)
     
-    # Fast Loader (Main thread only needed if cached)
     workers = 0 if cache_ram else 8
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True)
@@ -155,7 +143,6 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     print(f"📂 Data Split: {len(train_ds)} Training, {len(val_ds)} Validation")
     print(f"🏷️  Classes: {class_names}")
 
-    # --- Model Setup ---
     print(f"🏗️  Initializing {arch}...")
     if arch == 'mobilenet_v3_large':
         model = models.mobilenet_v3_large(weights='DEFAULT')
@@ -165,35 +152,30 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
         model.fc = nn.Linear(model.fc.in_features, len(class_names))
     
     model = model.to(device)
-    
-    # Initialize GPU Augmenter
     gpu_aug = GPUAugment().to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2)
+    
+    # --- AMP Scaler for Mixed Precision ---
+    scaler = torch.amp.GradScaler('cuda')
 
     best_acc = 0.0
     best_loss = float('inf')
     epochs_no_improve = 0
-    actual_epochs = 0
-    
-    # Keep track of best weights
     best_model_wts = copy.deepcopy(model.state_dict())
 
-    print("\n🔥 Starting Training Loop (GPU Accelerated)...")
+    print("\n🔥 Starting Training Loop (GPU Accelerated + AMP Mixed Precision)...")
     
     try:
         for epoch in range(epochs):
-            actual_epochs += 1
             print(f"\nEpoch {epoch+1}/{epochs}")
             print("-" * 10)
 
             for phase in ['train', 'val']:
-                if phase == 'train':
-                    model.train()
-                else:
-                    model.eval()
+                if phase == 'train': model.train()
+                else: model.eval()
 
                 running_loss = 0.0
                 running_corrects = 0
@@ -203,27 +185,28 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
                 loader = train_loader if phase == 'train' else val_loader
                 
                 for inputs, labels in loader:
-                    # 1. Move raw resized tensors to GPU
                     inputs = inputs.to(device, non_blocking=True)
                     labels = labels.to(device, non_blocking=True)
 
-                    # 2. Apply Augmentations ON GPU
-                    #    (Replaces the slow CPU bottleneck)
+                    # Augment (Keep in float32 for transforms usually, or let autocast handle if supported)
                     inputs = gpu_aug(inputs, is_training=(phase=='train'))
 
                     optimizer.zero_grad()
                     
                     with torch.set_grad_enabled(phase == 'train'):
-                        outputs = model(inputs)
-                        _, preds = torch.max(outputs, 1)
-                        loss = criterion(outputs, labels)
+                        # --- Mixed Precision Context ---
+                        with torch.amp.autocast('cuda'):
+                            outputs = model(inputs)
+                            loss = criterion(outputs, labels)
 
                         if phase == 'train':
-                            loss.backward()
-                            optimizer.step()
+                            # Scale loss for backprop
+                            scaler.scale(loss).backward()
+                            scaler.step(optimizer)
+                            scaler.update()
 
                     running_loss += loss.item() * inputs.size(0)
-                    running_corrects += torch.sum(preds == labels.data)
+                    running_corrects += torch.sum(torch.max(outputs, 1)[1] == labels.data)
                     total_samples += inputs.size(0)
 
                 epoch_loss = running_loss / total_samples
@@ -231,7 +214,6 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
                 epoch_time = time.time() - start_time
                 
                 print(f"{phase.capitalize()} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f} | Time: {epoch_time:.1f}s")
-                
                 if phase == 'train':
                     print(f"   🚀 Speed: {total_samples/epoch_time:.0f} images/sec")
 
@@ -256,17 +238,12 @@ def train_model(data_dir, output_model='model.onnx', output_labels='labels.txt',
     print("\n📦 Exporting BEST model to ONNX...")
     model.load_state_dict(best_model_wts)
     model.eval()
-    
-    # Trace with a dummy input
     dummy = torch.randn(1, 3, 300, 300, device=device)
-    torch.onnx.export(model, dummy, output_model, 
-                      input_names=['input'], output_names=['output'],
-                      opset_version=18)
+    torch.onnx.export(model, dummy, output_model, input_names=['input'], output_names=['output'], opset_version=18)
     
     with open(output_labels, 'w') as f:
         for name in class_names:
             f.write(f"{name}\n")
-    
     print(f"🏆 Done! Best Accuracy: {best_acc:.4f}")
 
 if __name__ == "__main__":
@@ -277,5 +254,4 @@ if __name__ == "__main__":
     parser.add_argument('--arch', type=str, default='mobilenet_v3_large')
     args = parser.parse_args()
     
-    # RAM Cache is enabled by default for speed
-    train_model(args.data_dir, epochs=args.epochs, batch_size=args.batch_size, arch=args.arch, cache_ram=True)
+    train_model(args.data_dir, epochs=args.epochs, batch_size=args.batch_size, arch=args.arch)
