@@ -1,9 +1,9 @@
-name: snd
+name: PyTorch Branch Build
 
 on:
   push:
     branches:
-      - "snd"
+      - "simpleclouddetect-pytorch"
     paths-ignore:
       - '*.md'
       - 'images/**'
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: snd
+          ref: simpleclouddetect-pytorch
       
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -45,9 +45,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-snd-${{ github.sha }}
+          key: ${{ runner.os }}-buildx-pytorch-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-buildx-snd-
+            ${{ runner.os }}-buildx-pytorch-
             ${{ runner.os }}-buildx-
       
       - name: Build and push
@@ -55,7 +55,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:pytorch
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           platforms: linux/amd64,linux/arm64
