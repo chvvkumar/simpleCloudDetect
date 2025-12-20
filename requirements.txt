@@ -1,4 +1,4 @@
-onnxruntime==1.17.1
+onnxruntime>=1.19.0
 pillow==10.2.0
 numpy==1.26.4
 paho-mqtt==1.6.1
