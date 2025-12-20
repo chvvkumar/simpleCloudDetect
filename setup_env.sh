@@ -22,7 +22,7 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu13
 
 # 6. Install Other Utilities
 echo "Installing utilities..."
-pip install onnx onnxruntime pillow numpy requests onnxscript
+pip install onnx onnxruntime pillow numpy requests onnxscript nvidia-dali-cuda120
 
 # 7. Create Symlink to Dataset (Optional but convenient)
 # This lets you refer to 'dataset' instead of the full path
