@@ -1,35 +1,39 @@
-FROM python:3.9-slim
+# Use a lightweight Python base image
+FROM python:3.11-slim-bookworm
 
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (required for some Python packages)
+# - build-essential: for compiling some python extensions
+# - curl: for healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 \
+    build-essential \
     curl \
-    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
+
+# Install Python dependencies
+# Note: On ARM64 (Raspberry Pi), pip will automatically fetch the correct wheels
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser
+# Copy application code
+COPY alpaca_safety_monitor.py .
+COPY detect.py .
+COPY train_model.py .
+COPY labels.txt .
+# Ensure model is copied. If you don't commit model.onnx to git, 
+# you should mount it as a volume at runtime, but copying serves as a fallback.
+COPY model.onnx .
 
-# Copy App
-COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
+# Expose the ASCOM Alpaca port
+EXPOSE 11111
 
-# Fix line endings and make the startup script executable and set ownership
-RUN dos2unix start_services.sh && \
-    chmod +x start_services.sh && \
-    chown -R appuser:appuser /app
+# Healthcheck to ensure the web server is responding
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:11111/management/apiversions || exit 1
 
-# Switch to non-root user
-USER appuser
-
-# FIX: Add healthcheck to ensure container restarts if Python process hangs
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:${ALPACA_PORT:-11111}/api/v1/safetymonitor/${ALPACA_DEVICE_NUMBER:-0}/connected || exit 1
-
-# Run the startup script to launch unified service
-CMD ["./start_services.sh"]
+# Run the Alpaca Safety Monitor
+CMD ["python", "alpaca_safety_monitor.py"]

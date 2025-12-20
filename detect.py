@@ -121,7 +121,7 @@ class HADiscoveryManager:
         confidence_config = {
             "name": "Confidence",
             "unique_id": f"clouddetect_{self.device_id}_confidence",
-            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/state",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}_confidence/state",
             "availability_topic": self.availability_topic,
             "unit_of_measurement": "%",
             "icon": "mdi:percent",
@@ -137,7 +137,7 @@ class HADiscoveryManager:
         time_config = {
             "name": "Detection Time",
             "unique_id": f"clouddetect_{self.device_id}_detection_time",
-            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/state",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}_detection_time/state",
             "availability_topic": self.availability_topic,
             "unit_of_measurement": "s",
             "device_class": "duration",
@@ -264,13 +264,16 @@ class CloudDetector:
 
     def _preprocess_image(self, image: Image.Image) -> np.ndarray:
         """Preprocess image for model input"""
-        # Resize
-        image = ImageOps.fit(image, (224, 224), Image.Resampling.LANCZOS)
+        # --- CHANGED: Use simple resize to match training script (300x300) ---
+        # Match the PyTorch transforms.Resize((300, 300)) logic
+        image = image.resize((300, 300), Image.Resampling.LANCZOS)
+        
         # Normalize (ImageNet stats)
         img_data = np.array(image).astype(np.float32) / 255.0
         mean = np.array([0.485, 0.456, 0.406])
         std = np.array([0.229, 0.224, 0.225])
         img_data = (img_data - mean) / std
+        
         # Transpose to (Batch, Channel, Height, Width)
         img_data = img_data.transpose(2, 0, 1)
         return np.expand_dims(img_data, axis=0)
