@@ -1,5 +1,7 @@
 <div align="center">
-<h1>☁️ Simple<span style="color: #22d3ee;">Cloud</span>Detect</h1>
+
+## ☁️ SimpleCloudDetect
+
 
 A Machine Learning-based cloud detection system for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor integration.
 
