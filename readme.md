@@ -45,6 +45,8 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/keras_model.h5:/app/keras_model.h5 \
+  -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://your-allsky-camera/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
@@ -52,6 +54,18 @@ docker run -d --name simple-cloud-detect --network=host \
   -e DEVICE_ID="clouddetect_001" \
   chvvkumar/simpleclouddetect:latest
 ```
+
+> **Important:** The model files (`keras_model.h5` and `labels.txt`) must have read+write permissions for the container user. To ensure proper permissions:
+> 
+> ```shell
+> # Set appropriate permissions (Linux/macOS)
+> chmod 666 /path/to/keras_model.h5
+> chmod 666 /path/to/labels.txt
+> 
+> # Or set ownership to your user and make group-writable
+> chown $USER:$USER /path/to/keras_model.h5 /path/to/labels.txt
+> chmod 664 /path/to/keras_model.h5 /path/to/labels.txt
+> ```
 
 That's it! Your device will automatically appear in Home Assistant under **Settings → Devices & Services → MQTT**.
 
@@ -142,6 +156,8 @@ For Raspberry Pi, use the same docker commands. The ARM64 build uses full Tensor
 **With URL-based image:**
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/keras_model.h5:/app/keras_model.h5 \
+  -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_PORT="1883" \
@@ -158,6 +174,8 @@ docker run -d --name simple-cloud-detect --network=host \
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
   -v $HOME/path/to/image.jpg:/tmp/image.jpg \
+  -v /path/to/keras_model.h5:/app/keras_model.h5 \
+  -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="file:///tmp/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
@@ -171,6 +189,8 @@ docker run -d --name simple-cloud-detect --network=host \
 **With URL-based image:**
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/keras_model.h5:/app/keras_model.h5 \
+  -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_TOPIC="Astro/SimpleCloudDetect" \
@@ -262,7 +282,6 @@ services:
       - DEVICE_ID=clouddetect_001
     volumes:
       - '$HOME/path/to/image.jpg:/tmp/image.jpg'
-    volumes:
       - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
       - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
@@ -386,10 +405,10 @@ docker run -d --name simple-cloud-detect --network=host \
 
 ## Recent Changes
 
-- **2025-01-30**: Add multi-arch support with support for ARM (Raspberry Pi)
-- **2025-01-30**: Add Home Assistant MQTT Discovery support for automatic device/entity creation
-- **2025-01-30**: Add ASCOM Alpaca SafetyMonitor implementation
-- **2025-01-09**: Add MQTT authentication support and improved logging
+- **2024-01-30**: Add multi-arch support with support for ARM (Raspberry Pi)
+- **2024-01-30**: Add Home Assistant MQTT Discovery support for automatic device/entity creation
+- **2024-01-30**: Add ASCOM Alpaca SafetyMonitor implementation
+- **2024-01-09**: Add MQTT authentication support and improved logging
 - **2024-12-16**: Add custom model and labels file support via bind mounts
 - **2024-11-19**: Add local image file support
 - **2024-10-26**: Initial release
