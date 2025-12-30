@@ -37,6 +37,7 @@ class Config:
     detect_interval: int
     mqtt_username: Optional[str]
     mqtt_password: Optional[str]
+    verify_ssl: bool
     # HA Discovery settings
     mqtt_discovery_mode: str
     mqtt_discovery_prefix: str
@@ -73,6 +74,7 @@ class Config:
             detect_interval=int(os.environ['DETECT_INTERVAL']),
             mqtt_username=os.getenv('MQTT_USERNAME'),
             mqtt_password=os.getenv('MQTT_PASSWORD'),
+            verify_ssl=os.getenv('VERIFY_SSL', 'false').lower() == 'true',
             mqtt_discovery_mode=discovery_mode,
             mqtt_discovery_prefix=os.getenv('MQTT_DISCOVERY_PREFIX', 'homeassistant'),
             device_name=os.getenv('DEVICE_NAME', 'Cloud Detector'),
@@ -255,7 +257,7 @@ class CloudDetector:
                         return Image.open(f).convert("RGB")
                 else:
                     # FIX: Strict timeout (5s connect, 10s read) and close socket immediately
-                    with self.session.get(image_url, timeout=(5, 10), stream=True) as response:
+                    with self.session.get(image_url, timeout=(5, 10), stream=True, verify=self.config.verify_ssl) as response:
                         response.raise_for_status()
                         # Load into memory buffer to allow socket to close
                         return Image.open(io.BytesIO(response.content)).convert("RGB")

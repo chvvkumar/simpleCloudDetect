@@ -55,6 +55,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_BROKER="192.168.1.250" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
   -e DETECT_INTERVAL="60" \
+  -e VERIFY_SSL="false" \
   -e DEVICE_ID="clouddetect_001" \
   chvvkumar/simpleclouddetect:latest
 ```
@@ -120,6 +121,7 @@ docker pull chvvkumar/simpleclouddetect:latest
 | `MQTT_USERNAME` | - | MQTT authentication username (optional) |
 | `MQTT_PASSWORD` | - | MQTT authentication password (optional) |
 | `DETECT_INTERVAL` | `60` | Detection interval in seconds |
+| `VERIFY_SSL` | `false` | Set to `true` to enable SSL certificate verification for HTTPS `IMAGE_URL`s. Defaults to `false` for convenience with self-signed certificates. |
 
 #### MQTT Publishing Modes
 
@@ -171,6 +173,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e MQTT_USERNAME="your_username" \
   -e MQTT_PASSWORD="your_password" \
   -e DETECT_INTERVAL="60" \
+  -e VERIFY_SSL="false" \
   chvvkumar/simpleclouddetect:latest
 ```
 
@@ -201,6 +204,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e DETECT_INTERVAL="60" \
   -e MQTT_USERNAME="your_username" \
   -e MQTT_PASSWORD="your_password" \
+  -e VERIFY_SSL="false" \
   chvvkumar/simpleclouddetect:latest
 ```
 
@@ -217,6 +221,7 @@ docker run -d --name simple-cloud-detect --network=host \
   -e DETECT_INTERVAL="60" \
   -e MQTT_DISCOVERY_MODE="homeassistant" \
   -e DEVICE_ID="clouddetect_001" \
+  -e VERIFY_SSL="false" \
   chvvkumar/simpleclouddetect:latest
 ```
 
@@ -241,6 +246,7 @@ services:
       - MQTT_USERNAME=
       - MQTT_PASSWORD=
       - DETECT_INTERVAL=60
+      - VERIFY_SSL=false
       - ALPACA_PORT=11111
       - ALPACA_UPDATE_INTERVAL=30
     volumes:
@@ -265,6 +271,7 @@ services:
       - MQTT_USERNAME=your_username
       - MQTT_PASSWORD=your_password
       - DETECT_INTERVAL=60
+      - VERIFY_SSL=false
     volumes:
       - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
       - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
