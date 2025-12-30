@@ -37,6 +37,7 @@ class Config:
     detect_interval: int
     mqtt_username: Optional[str]
     mqtt_password: Optional[str]
+    verify_ssl: bool
     # HA Discovery settings
     mqtt_discovery_mode: str
     mqtt_discovery_prefix: str
@@ -73,6 +74,7 @@ class Config:
             detect_interval=int(os.environ['DETECT_INTERVAL']),
             mqtt_username=os.getenv('MQTT_USERNAME'),
             mqtt_password=os.getenv('MQTT_PASSWORD'),
+            verify_ssl=os.getenv('VERIFY_SSL', 'false').lower() == 'true',
             mqtt_discovery_mode=discovery_mode,
             mqtt_discovery_prefix=os.getenv('MQTT_DISCOVERY_PREFIX', 'homeassistant'),
             device_name=os.getenv('DEVICE_NAME', 'Cloud Detector'),
@@ -243,14 +245,19 @@ class CloudDetector:
                 if image_url.startswith("file://"):
                     # Handle file URLs
                     parsed = urllib.parse.urlparse(image_url)
-                    file_path = Path(parsed.path.lstrip('/'))  # Remove leading slashes
+                    path_str = urllib.parse.unquote(parsed.path)
+                    # On Windows, a path from a file URI might start with a slash (e.g., /C:/Users/...)
+                    # We remove it to create a valid absolute path.
+                    if os.name == 'nt' and path_str.startswith('/'):
+                        path_str = path_str[1:]
+                    file_path = Path(path_str)
                     if not file_path.exists():
                         raise FileNotFoundError(f"Image file not found: {file_path}")
                     with open(file_path, 'rb') as f:
                         return Image.open(f).convert("RGB")
                 else:
                     # FIX: Strict timeout (5s connect, 10s read) and close socket immediately
-                    with self.session.get(image_url, timeout=(5, 10), stream=True) as response:
+                    with self.session.get(image_url, timeout=(5, 10), stream=True, verify=self.config.verify_ssl) as response:
                         response.raise_for_status()
                         # Load into memory buffer to allow socket to close
                         return Image.open(io.BytesIO(response.content)).convert("RGB")
