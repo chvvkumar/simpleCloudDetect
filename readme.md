@@ -416,6 +416,7 @@ docker run -d --name simple-cloud-detect --network=host \
 
 ## Recent Changes
 
+- **2025-12-30**: Add `VERIFY_SSL` environment variable to disable SSL certificate verification for HTTPS `IMAGE_URL`s. Defaults to `false`.
 - **2024-01-30**: Add multi-arch support with support for ARM (Raspberry Pi)
 - **2024-01-30**: Add Home Assistant MQTT Discovery support for automatic device/entity creation
 - **2024-01-30**: Add ASCOM Alpaca SafetyMonitor implementation
