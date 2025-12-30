@@ -243,7 +243,12 @@ class CloudDetector:
                 if image_url.startswith("file://"):
                     # Handle file URLs
                     parsed = urllib.parse.urlparse(image_url)
-                    file_path = Path(parsed.path.lstrip('/'))  # Remove leading slashes
+                    path_str = urllib.parse.unquote(parsed.path)
+                    # On Windows, a path from a file URI might start with a slash (e.g., /C:/Users/...)
+                    # We remove it to create a valid absolute path.
+                    if os.name == 'nt' and path_str.startswith('/'):
+                        path_str = path_str[1:]
+                    file_path = Path(path_str)
                     if not file_path.exists():
                         raise FileNotFoundError(f"Image file not found: {file_path}")
                     with open(file_path, 'rb') as f:
