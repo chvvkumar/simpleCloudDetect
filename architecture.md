@@ -47,8 +47,8 @@ graph TD
         B -- Loads --> E(labels.txt)
     end
 
-    style A fill:#cde4ff
-    style B fill:#ffd9c0
+    style A fill:#264653,color:#fff
+    style B fill:#2a9d8f,color:#fff
 ```
 
 ### 2.1. `detect.py`: The Inference Engine
