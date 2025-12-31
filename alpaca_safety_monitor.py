@@ -35,6 +35,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+start_time = datetime.now()
 
 # Global timezone helper
 def get_current_time(timezone_str: str = 'UTC') -> datetime:
@@ -1702,8 +1703,7 @@ def setup_device(device_number: int):
                             
                             <!-- Current Detection - Prominent -->
                             <div class="status-card status-card-large">
-                                <div class="status-card-title detection-title">Current Detection</div>
-                                <div class="detection-grid">
+                                <div class="detection-grid" style="margin-top: 0; height: 100%;">
                                     <div class="detection-item">
                                         <div class="detection-label">Condition</div>
                                         <div class="detection-value">{{ current_condition }}</div>
@@ -1723,6 +1723,10 @@ def setup_device(device_number: int):
                                     <div class="detection-item">
                                         <div class="detection-label">Last Updated</div>
                                         <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Container Uptime</div>
+                                        <div class="detection-value" style="font-size: 14px;">{{ container_uptime }}</div>
                                     </div>
                                 </div>
                             </div>
@@ -1754,7 +1758,7 @@ def setup_device(device_number: int):
                         
                         <!-- ASCOM Connection & Device Info - Horizontal Layout -->
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                            <!-- ASCOM Connection - Collapsible -->
+                            <!-- Client Connection - Collapsible -->
                             <div>
                                 <button class="collapsible-btn" onclick="toggleCollapsible('ascom-details')">
                                     <span><span class="icon">🔌</span> ASCOM Connection: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
@@ -2574,6 +2578,18 @@ def setup_device(device_number: int):
             'confidence': f"{entry['confidence']:.1f}"
         })
     
+    uptime_delta = datetime.now() - start_time
+    days = uptime_delta.days
+    hours, rem = divmod(uptime_delta.seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    if days > 0:
+        container_uptime = f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        container_uptime = f"{hours}h {minutes}m {seconds}s"
+    else:
+        container_uptime = f"{minutes}m {seconds}s"
+
     return render_template_string(
         html_template,
         message=message,
@@ -2604,6 +2620,7 @@ def setup_device(device_number: int):
         debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
         debounce_to_unsafe=safety_monitor.alpaca_config.debounce_to_unsafe_sec,
         default_threshold=safety_monitor.alpaca_config.default_threshold,
+        container_uptime=container_uptime,
         class_thresholds=safety_monitor.alpaca_config.class_thresholds
     )
 
