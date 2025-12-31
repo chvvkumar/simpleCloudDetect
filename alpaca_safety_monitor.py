@@ -1771,7 +1771,7 @@ def setup_device(device_number: int):
                                         </p>
                                         {% if connection_duration %}
                                         <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
+                                            Session Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
                                         </p>
                                         {% endif %}
                                         {% if last_connected %}
