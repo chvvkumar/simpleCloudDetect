@@ -363,13 +363,10 @@ The container includes an ASCOM Alpaca SafetyMonitor service (Interface Version 
 3. **Configure Device**: Set name, location, and unsafe conditions
 4. **Add to Software**: Configure in N.I.N.A., SGP, TheSkyX, etc.
 
-![Alpaca Setup Page](/images/setup.jpg)
 
 ### Supported Software
 
 - N.I.N.A. (Nighttime Imaging 'N' Astronomy)
-- Sequence Generator Pro
-- TheSkyX
 - Any ASCOM Alpaca-compatible application
 
 ![N.I.N.A. Integration](/images/NINA.jpg)
