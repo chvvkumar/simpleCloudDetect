@@ -1754,7 +1754,7 @@ def setup_device(device_number: int):
                         
                         <!-- ASCOM Connection & Device Info - Horizontal Layout -->
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                            <!-- ASCOM Connection - Collapsible -->
+                            <!-- Client Connection - Collapsible -->
                             <div>
                                 <button class="collapsible-btn" onclick="toggleCollapsible('ascom-details')">
                                     <span><span class="icon">🔌</span> ASCOM Connection: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
