@@ -141,6 +141,7 @@ class AlpacaSafetyMonitor:
         self.disconnected_at: Optional[datetime] = None
         self.last_connected_at: Optional[datetime] = None  # Track last successful connection
         self.client_ip: Optional[str] = None  # Track connected client's IP address
+        self.last_session_duration: Optional[float] = None
         
         # Cloud detection state - use single lock for all state
         self.latest_detection: Optional[Dict[str, Any]] = {
@@ -456,6 +457,9 @@ class AlpacaSafetyMonitor:
             # Just mark as disconnected - detection loop keeps running for MQTT/web UI
             self.connected = False
             self.disconnected_at = get_current_time(self.alpaca_config.timezone)
+            if self.connected_at:
+                duration = (self.disconnected_at - self.connected_at).total_seconds()
+                self.last_session_duration = duration
             self.connected_at = None
             logger.info("ASCOM client disconnected from safety monitor")
         except Exception as e:
@@ -1769,19 +1773,27 @@ def setup_device(device_number: int):
                                         <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
                                             Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span>
                                         </p>
-                                        {% if connection_duration %}
+                                        {% if client_ip %}
                                         <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Session Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
+                                            Client: <strong style="color: rgb(226, 232, 240);">{{ client_ip }}</strong>
                                         </p>
+                                        {% endif %}
+                                        {% if ascom_status == 'Connected' %}
+                                            {% if connection_duration %}
+                                            <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
+                                            </p>
+                                            {% endif %}
+                                        {% else %}
+                                            {% if last_session_duration %}
+                                            <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                Last Session Duration: <strong style="color: rgb(226, 232, 240);">{{ last_session_duration }}</strong>
+                                            </p>
+                                            {% endif %}
                                         {% endif %}
                                         {% if last_connected %}
                                         <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
                                             Last Connected: <strong style="color: rgb(226, 232, 240);">{{ last_connected }}</strong>
-                                        </p>
-                                        {% endif %}
-                                        {% if client_ip %}
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Client: <strong style="color: rgb(226, 232, 240);">{{ client_ip }}</strong>
                                         </p>
                                         {% endif %}
                                         {% if last_disconnected %}
@@ -2510,6 +2522,7 @@ def setup_device(device_number: int):
         last_update = 'Never'
     
     # Check ASCOM connection status
+    last_session_duration_str = None
     if safety_monitor.connected:
         ascom_status = 'Connected'
         ascom_status_class = 'status-connected'
@@ -2531,6 +2544,16 @@ def setup_device(device_number: int):
         ascom_status = 'Disconnected'
         ascom_status_class = 'status-disconnected'
         connection_duration = None
+        if safety_monitor.last_session_duration is not None:
+            duration = safety_monitor.last_session_duration
+            hours, remainder = divmod(int(duration), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            if hours > 0:
+                last_session_duration_str = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                last_session_duration_str = f"{minutes}m {seconds}s"
+            else:
+                last_session_duration_str = f"{seconds}s"
     
     # Format last connected/disconnected timestamps with current timezone
     last_connected = None
@@ -2612,6 +2635,7 @@ def setup_device(device_number: int):
         ascom_safe_color=ascom_safe_color,
         safety_history=safety_history,
         connection_duration=connection_duration,
+        last_session_duration=last_session_duration_str,
         client_ip=safety_monitor.client_ip,
         last_connected=last_connected,
         last_disconnected=last_disconnected,
