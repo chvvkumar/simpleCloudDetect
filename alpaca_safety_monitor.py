@@ -35,6 +35,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+start_time = datetime.now()
 
 # Global timezone helper
 def get_current_time(timezone_str: str = 'UTC') -> datetime:
@@ -1724,6 +1725,10 @@ def setup_device(device_number: int):
                                         <div class="detection-label">Last Updated</div>
                                         <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
                                     </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Docker Container Uptime</div>
+                                        <div class="detection-value" style="font-size: 14px;">{{ container_uptime }}</div>
+                                    </div>
                                 </div>
                             </div>
                             
@@ -2574,6 +2579,18 @@ def setup_device(device_number: int):
             'confidence': f"{entry['confidence']:.1f}"
         })
     
+    uptime_delta = datetime.now() - start_time
+    days = uptime_delta.days
+    hours, rem = divmod(uptime_delta.seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    if days > 0:
+        container_uptime = f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        container_uptime = f"{hours}h {minutes}m {seconds}s"
+    else:
+        container_uptime = f"{minutes}m {seconds}s"
+
     return render_template_string(
         html_template,
         message=message,
@@ -2604,6 +2621,7 @@ def setup_device(device_number: int):
         debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
         debounce_to_unsafe=safety_monitor.alpaca_config.debounce_to_unsafe_sec,
         default_threshold=safety_monitor.alpaca_config.default_threshold,
+        container_uptime=container_uptime,
         class_thresholds=safety_monitor.alpaca_config.class_thresholds
     )
 
