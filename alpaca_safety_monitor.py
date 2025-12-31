@@ -1702,7 +1702,7 @@ def setup_device(device_number: int):
                             
                             <!-- Current Detection - Prominent -->
                             <div class="status-card status-card-large">
-                                <div class="status-card-title detection-title">⚡ Current Detection</div>
+                                <div class="status-card-title detection-title">Current Detection</div>
                                 <div class="detection-grid">
                                     <div class="detection-item">
                                         <div class="detection-label">Condition</div>

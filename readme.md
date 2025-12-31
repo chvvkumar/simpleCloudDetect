@@ -430,6 +430,7 @@ docker run -d --name simple-cloud-detect --network=host \
 ## Documentation
 
 - **[Main Documentation](readme.md)** - This file
+- **[System Architecture](architecture.md)** - A detailed look at the components and data flow.
 - **[Alpaca SafetyMonitor Guide](ALPACA_README.md)** - ASCOM Alpaca implementation details
 
 ---
