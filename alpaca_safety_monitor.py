@@ -1703,8 +1703,7 @@ def setup_device(device_number: int):
                             
                             <!-- Current Detection - Prominent -->
                             <div class="status-card status-card-large">
-                                <div class="status-card-title detection-title">Current Detection</div>
-                                <div class="detection-grid">
+                                <div class="detection-grid" style="margin-top: 0; height: 100%;">
                                     <div class="detection-item">
                                         <div class="detection-label">Condition</div>
                                         <div class="detection-value">{{ current_condition }}</div>
@@ -1726,7 +1725,7 @@ def setup_device(device_number: int):
                                         <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
                                     </div>
                                     <div class="detection-item">
-                                        <div class="detection-label">Docker Container Uptime</div>
+                                        <div class="detection-label">Container Uptime</div>
                                         <div class="detection-value" style="font-size: 14px;">{{ container_uptime }}</div>
                                     </div>
                                 </div>
