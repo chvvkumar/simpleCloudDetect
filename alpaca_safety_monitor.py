@@ -1700,9 +1700,14 @@ def setup_device(device_number: int):
                 
                 <!-- Status Overview Section -->
                 <div class="section">
-                    <div class="section-header">
-                        <span class="icon">📊</span>
-                        <span>System <span class="highlight">Status</span></span>
+                    <div class="section-header" style="justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span class="icon">🤖</span>
+                            <span>System <span class="highlight">Status</span></span>
+                        </div>
+                        <div style="font-size: 14px; font-weight: 400; color: rgb(148, 163, 184); font-family: 'JetBrains Mono', monospace; text-shadow: none; letter-spacing: 0;">
+                            {{ current_name }} <span style="margin: 0 8px; opacity: 0.5;">|</span> {{ current_location }}
+                        </div>
                     </div>
                     
                     <div class="status-grid">
@@ -1777,12 +1782,12 @@ def setup_device(device_number: int):
                             </div>
                         </div>
                         
-                        <!-- ASCOM Connection & Device Info - Horizontal Layout -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <!-- ASCOM Connection - Full Width -->
+                        <div>
                             <!-- Client Connection - Collapsible -->
                             <div>
                                 <button class="collapsible-btn" onclick="toggleCollapsible('ascom-details')">
-                                    <span><span class="icon">🔌</span> ASCOM Connection: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
+                                    <span><span class="icon">🔭</span> ASCOM Clients: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
                                     <span class="arrow">▼</span>
                                 </button>
                                 <div id="ascom-details" class="collapsible-content">
@@ -1801,47 +1806,29 @@ def setup_device(device_number: int):
                                             <table id="clientTable" style="width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
                                                 <thead>
                                                     <tr style="background: rgba(15, 23, 42, 0.8); position: sticky; top: 0; z-index: 10;">
-                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">Status ↕</th>
-                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">IP ↕</th>
-                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(2)">Time ↕</th>
-                                                        <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Dur ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">IP ↕</th>
+                                                        <th style="padding: 8px; text-align: center; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">Status ↕</th>
+                                                        <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(2)">Duration ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Connected ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(4)">Disconnected ↕</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {% for client in client_list %}
                                                     <tr style="border-bottom: 1px solid rgba(71, 85, 105, 0.2); transition: background 0.2s;">
-                                                        <td style="padding: 8px; color: {{ 'rgb(52, 211, 153)' if client.status == 'connected' else 'rgb(148, 163, 184)' }}; text-align: center;">
+                                                        <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
+                                                        <td style="padding: 8px; color: {{ 'rgb(52, 211, 153)' if client.status == 'connected' else 'rgb(148, 163, 184)' }}; text-align: center;" data-sort="{{ 1 if client.status == 'connected' else 0 }}">
                                                             {{ '●' if client.status == 'connected' else '○' }}
                                                         </td>
-                                                        <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
-                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-timestamp="{{ client.timestamp_raw }}">
-                                                            <span style="font-size: 10px; opacity: 0.7;">{{ client.time_label }}</span> {{ client.time_val }}
-                                                        </td>
-                                                        <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);">{{ client.duration }}</td>
+                                                        <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);" data-sort="{{ client.duration_seconds }}">{{ client.duration }}</td>
+                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.connected_ts }}">{{ client.connected_time }}</td>
+                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.disconnected_ts }}">{{ client.disconnected_time }}</td>
                                                     </tr>
                                                     {% endfor %}
                                                 </tbody>
                                             </table>
                                         </div>
                                         {% endif %}
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Device Info - Collapsible -->
-                            <div>
-                                <button class="collapsible-btn" onclick="toggleCollapsible('device-details')">
-                                    <span><span class="icon">⚙️</span> Device Information</span>
-                                    <span class="arrow">▼</span>
-                                </button>
-                                <div id="device-details" class="collapsible-content">
-                                    <div class="collapsible-inner">
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Name: <strong style="color: rgb(226, 232, 240);">{{ current_name }}</strong>
-                                        </p>
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Location: <strong style="color: rgb(226, 232, 240);">{{ current_location }}</strong>
-                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -1864,11 +1851,15 @@ def setup_device(device_number: int):
                             x = rows[i].getElementsByTagName("TD")[n];
                             y = rows[i + 1].getElementsByTagName("TD")[n];
                             
-                            var xVal = x.textContent.toLowerCase();
-                            var yVal = y.textContent.toLowerCase();
-                            if (n === 2) {
-                                xVal = parseFloat(x.getAttribute("data-timestamp")) || 0;
-                                yVal = parseFloat(y.getAttribute("data-timestamp")) || 0;
+                            var xVal = x.getAttribute("data-sort");
+                            var yVal = y.getAttribute("data-sort");
+                            
+                            if (xVal !== null && yVal !== null) {
+                                xVal = parseFloat(xVal);
+                                yVal = parseFloat(yVal);
+                            } else {
+                                xVal = x.textContent.toLowerCase();
+                                yVal = y.textContent.toLowerCase();
                             }
                             
                             if (dir == "asc") {
@@ -2602,10 +2593,8 @@ def setup_device(device_number: int):
                 tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
                 local_time = conn_time.astimezone(tz)
                 time_str = local_time.strftime('%H:%M:%S')
-                date_str = local_time.strftime('%Y-%m-%d')
             except Exception:
                 time_str = conn_time.strftime('%H:%M:%S')
-                date_str = conn_time.strftime('%Y-%m-%d')
             
             # Calculate duration
             if conn_time.tzinfo is None:
@@ -2626,10 +2615,12 @@ def setup_device(device_number: int):
             client_list.append({
                 'status': 'connected',
                 'ip': ip,
-                'time_label': 'Since',
-                'time_val': time_str,
+                'connected_time': time_str,
+                'disconnected_time': '-',
                 'duration': duration_str,
-                'timestamp_raw': conn_time.timestamp()
+                'connected_ts': conn_time.timestamp(),
+                'disconnected_ts': 0,
+                'duration_seconds': duration.total_seconds()
             })
 
         # Add Disconnected Clients
@@ -2637,11 +2628,12 @@ def setup_device(device_number: int):
             try:
                 tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
                 local_disc_time = disc_time.astimezone(tz)
+                local_conn_time = conn_time.astimezone(tz)
                 disc_time_str = local_disc_time.strftime('%H:%M:%S')
-                disc_date_str = local_disc_time.strftime('%Y-%m-%d')
+                conn_time_str = local_conn_time.strftime('%H:%M:%S')
             except Exception:
                 disc_time_str = disc_time.strftime('%H:%M:%S')
-                disc_date_str = disc_time.strftime('%Y-%m-%d')
+                conn_time_str = conn_time.strftime('%H:%M:%S')
                 
             # Calculate duration
             duration = disc_time - conn_time
@@ -2658,14 +2650,16 @@ def setup_device(device_number: int):
             client_list.append({
                 'status': 'disconnected',
                 'ip': ip,
-                'time_label': 'Disconnected at',
-                'time_val': disc_time_str,
+                'connected_time': conn_time_str,
+                'disconnected_time': disc_time_str,
                 'duration': duration_str,
-                'timestamp_raw': disc_time.timestamp()
+                'connected_ts': conn_time.timestamp(),
+                'disconnected_ts': disc_time.timestamp(),
+                'duration_seconds': duration.total_seconds()
             })
             
         # Sort by timestamp descending
-        client_list.sort(key=lambda x: x['timestamp_raw'], reverse=True)
+        client_list.sort(key=lambda x: x['connected_ts'], reverse=True)
             
     if is_connected:
         ascom_status = 'Connected'
