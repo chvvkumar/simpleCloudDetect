@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import json
 import base64
 import io
@@ -135,12 +135,14 @@ class AlpacaSafetyMonitor:
         self.transaction_lock = threading.Lock()
         
         # Device state
-        self.connected = False
+        self.connected_clients: Dict[Tuple[str, int], datetime] = {}  # (IP, ClientID) -> ConnectionTime
+        self.disconnected_clients: Dict[Tuple[str, int], Tuple[datetime, datetime]] = {} # (IP, ClientID) -> (ConnectionTime, DisconnectionTime)
+        self.connection_lock = threading.Lock()
         self.connecting = False
         self.connected_at: Optional[datetime] = None
         self.disconnected_at: Optional[datetime] = None
         self.last_connected_at: Optional[datetime] = None  # Track last successful connection
-        self.client_ip: Optional[str] = None  # Track connected client's IP address
+        self.client_ip: Optional[str] = None  # Track connected client's IP address (deprecated in multi-client)
         self.last_session_duration: Optional[float] = None
         
         # Cloud detection state - use single lock for all state
@@ -432,41 +434,57 @@ class AlpacaSafetyMonitor:
         
         logger.info("Detection loop stopped")
     
-    def connect(self, client_ip: Optional[str] = None):
-        """Connect to the device (ASCOM client connection)"""
-        if self.connected:
-            return
-        
-        try:
-            # Just mark as connected - detection loop is already running
-            self.connected = True
-            self.connected_at = get_current_time(self.alpaca_config.timezone)
-            self.last_connected_at = self.connected_at
-            self.client_ip = client_ip
-            logger.info(f"ASCOM client connected to safety monitor from {client_ip or 'unknown'}")
-        except Exception as e:
-            logger.error(f"Failed to connect: {e}")
-            raise
-    
-    def disconnect(self):
-        """Disconnect from the device (ASCOM client disconnection)"""
-        if not self.connected:
-            return
-        
-        try:
-            # Just mark as disconnected - detection loop keeps running for MQTT/web UI
-            self.connected = False
-            self.disconnected_at = get_current_time(self.alpaca_config.timezone)
-            if self.connected_at:
-                duration = (self.disconnected_at - self.connected_at).total_seconds()
-                self.last_session_duration = duration
-            self.connected_at = None
-            logger.info("ASCOM client disconnected from safety monitor")
-        except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
-    
+    @property
+    def is_connected(self) -> bool:
+        """Check if any clients are connected"""
+        with self.connection_lock:
+            return len(self.connected_clients) > 0
+
+    def connect(self, client_ip: str, client_id: int):
+        """Connect a client to the device"""
+        with self.connection_lock:
+            # Add or update client session
+            key = (client_ip, client_id)
+            self.connected_clients[key] = get_current_time(self.alpaca_config.timezone)
+            
+            # If this is the first connection, set global connected_at
+            if len(self.connected_clients) == 1:
+                self.connected_at = self.connected_clients[key]
+                self.last_connected_at = self.connected_at
+                self.disconnected_at = None
+                
+            logger.info(f"Client connected: {client_ip} (ID: {client_id}). Total clients: {len(self.connected_clients)}")
+
+    def disconnect(self, client_ip: str, client_id: int):
+        """Disconnect a client from the device"""
+        with self.connection_lock:
+            key = (client_ip, client_id)
+            if key in self.connected_clients:
+                # Move to disconnected history
+                conn_time = self.connected_clients[key]
+                disc_time = get_current_time(self.alpaca_config.timezone)
+                self.disconnected_clients[key] = (conn_time, disc_time)
+                
+                del self.connected_clients[key]
+                logger.info(f"Client disconnected: {client_ip} (ID: {client_id}). Total clients: {len(self.connected_clients)}")
+                
+                # If no clients left, update global disconnected state
+                if len(self.connected_clients) == 0:
+                    self.disconnected_at = disc_time
+                    if self.connected_at:
+                        duration = (self.disconnected_at - self.connected_at).total_seconds()
+                        self.last_session_duration = duration
+                    self.connected_at = None
+                    logger.info("All clients disconnected")
+            else:
+                logger.warning(f"Attempted to disconnect unknown client: {client_ip} (ID: {client_id})")
+
     def is_safe(self) -> bool:
         """Determine if conditions are safe based on latest detection"""
+        # Safety Fail-safe: Always return False if not connected
+        if not self.is_connected:
+            return False
+            
         with self.detection_lock:
             return self._stable_safe_state
     
@@ -474,8 +492,8 @@ class AlpacaSafetyMonitor:
         """Get current operational state"""
         # Per ASCOM spec: DeviceState should only include operational properties
         # For SafetyMonitor, only IsSafe is operational
-        with self.detection_lock:
-            return [{"Name": "IsSafe", "Value": self._stable_safe_state if self.connected else False}]
+        is_safe_val = self.is_safe()
+        return [{"Name": "IsSafe", "Value": is_safe_val}]
         
     def _get_arg(self, key: str, default: Any = None) -> str:
         """Case-insensitive argument retrieval from request values"""
@@ -533,7 +551,8 @@ def get_issafe(device_number: int):
     
     # Per ASCOM spec: Always return a value, never an error
     # If disconnected, return False (unsafe) to protect equipment
-    is_safe = safety_monitor.is_safe() if safety_monitor.connected else False
+    # is_safe() now handles the connection check internally
+    is_safe = safety_monitor.is_safe()
     
     return jsonify(safety_monitor.create_response(
         value=is_safe,
@@ -550,7 +569,7 @@ def get_connected(device_number: int):
     
     _, client_tx_id = safety_monitor.get_client_params()
     return jsonify(safety_monitor.create_response(
-        value=safety_monitor.connected,
+        value=safety_monitor.is_connected,
         client_transaction_id=client_tx_id
     ))
 
@@ -562,7 +581,7 @@ def set_connected(device_number: int):
     if error_response:
         return error_response
     
-    _, client_tx_id = safety_monitor.get_client_params()
+    client_id, client_tx_id = safety_monitor.get_client_params()
     connected_str = safety_monitor._get_arg('Connected', '').strip().lower()
     
     if connected_str == 'true':
@@ -577,12 +596,11 @@ def set_connected(device_number: int):
         )), 400
 
     try:
-        if target_state != safety_monitor.connected:
-            if target_state:
-                client_ip = request.remote_addr
-                safety_monitor.connect(client_ip=client_ip)
-            else:
-                safety_monitor.disconnect()
+        client_ip = request.remote_addr
+        if target_state:
+            safety_monitor.connect(client_ip=client_ip, client_id=client_id)
+        else:
+            safety_monitor.disconnect(client_ip=client_ip, client_id=client_id)
         
         return jsonify(safety_monitor.create_response(
             client_transaction_id=client_tx_id
@@ -617,11 +635,10 @@ def connect_device(device_number: int):
     if error_response:
         return error_response
     
-    _, client_tx_id = safety_monitor.get_client_params()
+    client_id, client_tx_id = safety_monitor.get_client_params()
     try:
-        if not safety_monitor.connected:
-            client_ip = request.remote_addr
-            safety_monitor.connect(client_ip=client_ip)
+        client_ip = request.remote_addr
+        safety_monitor.connect(client_ip=client_ip, client_id=client_id)
         return jsonify(safety_monitor.create_response(client_transaction_id=client_tx_id))
     except Exception as e:
         logger.error(f"Failed to connect: {e}")
@@ -639,10 +656,10 @@ def disconnect_device(device_number: int):
     if error_response:
         return error_response
     
-    _, client_tx_id = safety_monitor.get_client_params()
+    client_id, client_tx_id = safety_monitor.get_client_params()
     try:
-        if safety_monitor.connected:
-            safety_monitor.disconnect()
+        client_ip = request.remote_addr
+        safety_monitor.disconnect(client_ip=client_ip, client_id=client_id)
         return jsonify(safety_monitor.create_response(client_transaction_id=client_tx_id))
     except Exception as e:
         logger.error(f"Error during disconnect: {e}")
@@ -1770,36 +1787,42 @@ def setup_device(device_number: int):
                                 </button>
                                 <div id="ascom-details" class="collapsible-content">
                                     <div class="collapsible-inner">
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span>
-                                        </p>
-                                        {% if client_ip %}
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Client: <strong style="color: rgb(226, 232, 240);">{{ client_ip }}</strong>
-                                        </p>
-                                        {% endif %}
-                                        {% if ascom_status == 'Connected' %}
-                                            {% if connection_duration %}
-                                            <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                                Duration: <strong style="color: rgb(226, 232, 240);">{{ connection_duration }}</strong>
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                            <p style="margin: 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span>
                                             </p>
-                                            {% endif %}
-                                        {% else %}
-                                            {% if last_session_duration %}
-                                            <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                                Last Session Duration: <strong style="color: rgb(226, 232, 240);">{{ last_session_duration }}</strong>
+                                            <p style="margin: 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                Active: <strong style="color: rgb(226, 232, 240);">{{ client_count }}</strong>
                                             </p>
-                                            {% endif %}
-                                        {% endif %}
-                                        {% if last_connected %}
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Last Connected: <strong style="color: rgb(226, 232, 240);">{{ last_connected }}</strong>
-                                        </p>
-                                        {% endif %}
-                                        {% if last_disconnected %}
-                                        <p style="margin: 6px 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
-                                            Last Disconnected: <strong style="color: rgb(226, 232, 240);">{{ last_disconnected }}</strong>
-                                        </p>
+                                        </div>
+
+                                        {% if client_list %}
+                                        <div style="max-height: 250px; overflow-y: auto; border: 1px solid rgba(71, 85, 105, 0.3); border-radius: 6px;">
+                                            <table id="clientTable" style="width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+                                                <thead>
+                                                    <tr style="background: rgba(15, 23, 42, 0.8); position: sticky; top: 0; z-index: 10;">
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">Status ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">IP ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(2)">Time ↕</th>
+                                                        <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Dur ↕</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for client in client_list %}
+                                                    <tr style="border-bottom: 1px solid rgba(71, 85, 105, 0.2); transition: background 0.2s;">
+                                                        <td style="padding: 8px; color: {{ 'rgb(52, 211, 153)' if client.status == 'connected' else 'rgb(148, 163, 184)' }}; text-align: center;">
+                                                            {{ '●' if client.status == 'connected' else '○' }}
+                                                        </td>
+                                                        <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
+                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-timestamp="{{ client.timestamp_raw }}">
+                                                            <span style="font-size: 10px; opacity: 0.7;">{{ client.time_label }}</span> {{ client.time_val }}
+                                                        </td>
+                                                        <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);">{{ client.duration }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                         {% endif %}
                                     </div>
                                 </div>
@@ -1827,6 +1850,46 @@ def setup_device(device_number: int):
                 </div>
                 
                 <script>
+                function sortClientTable(n) {
+                    var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+                    table = document.getElementById("clientTable");
+                    if (!table) return;
+                    switching = true;
+                    dir = "asc"; 
+                    while (switching) {
+                        switching = false;
+                        rows = table.rows;
+                        for (i = 1; i < (rows.length - 1); i++) {
+                            shouldSwitch = false;
+                            x = rows[i].getElementsByTagName("TD")[n];
+                            y = rows[i + 1].getElementsByTagName("TD")[n];
+                            
+                            var xVal = x.textContent.toLowerCase();
+                            var yVal = y.textContent.toLowerCase();
+                            if (n === 2) {
+                                xVal = parseFloat(x.getAttribute("data-timestamp")) || 0;
+                                yVal = parseFloat(y.getAttribute("data-timestamp")) || 0;
+                            }
+                            
+                            if (dir == "asc") {
+                                if (xVal > yVal) { shouldSwitch = true; break; }
+                            } else if (dir == "desc") {
+                                if (xVal < yVal) { shouldSwitch = true; break; }
+                            }
+                        }
+                        if (shouldSwitch) {
+                            rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                            switching = true;
+                            switchcount ++; 
+                        } else {
+                            if (switchcount == 0 && dir == "asc") {
+                                dir = "desc";
+                                switching = true;
+                            }
+                        }
+                    }
+                }
+
                 function toggleCollapsible(id) {
                     const content = document.getElementById(id);
                     const btn = content.previousElementSibling;
@@ -2523,58 +2586,93 @@ def setup_device(device_number: int):
     
     # Check ASCOM connection status
     last_session_duration_str = None
-    if safety_monitor.connected:
-        ascom_status = 'Connected'
-        ascom_status_class = 'status-connected'
+    
+    # Snapshot connection state with lock
+    with safety_monitor.connection_lock:
+        client_count = len(safety_monitor.connected_clients)
+        is_connected = client_count > 0
         
-        # Calculate connection duration
-        if safety_monitor.connected_at:
-            duration = get_current_time(safety_monitor.alpaca_config.timezone) - safety_monitor.connected_at
+        # Generate client list for display
+        client_list = []
+        current_time = get_current_time(safety_monitor.alpaca_config.timezone)
+        
+        # Add Connected Clients
+        for (ip, cid), conn_time in safety_monitor.connected_clients.items():
+            try:
+                tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+                local_time = conn_time.astimezone(tz)
+                time_str = local_time.strftime('%H:%M:%S')
+                date_str = local_time.strftime('%Y-%m-%d')
+            except Exception:
+                time_str = conn_time.strftime('%H:%M:%S')
+                date_str = conn_time.strftime('%Y-%m-%d')
+            
+            # Calculate duration
+            if conn_time.tzinfo is None:
+                duration = current_time.replace(tzinfo=None) - conn_time
+            else:
+                duration = current_time - conn_time.astimezone(current_time.tzinfo)
+                
             hours, remainder = divmod(int(duration.total_seconds()), 3600)
             minutes, seconds = divmod(remainder, 60)
+            
             if hours > 0:
-                connection_duration = f"{hours}h {minutes}m {seconds}s"
+                duration_str = f"{hours}h {minutes}m {seconds}s"
             elif minutes > 0:
-                connection_duration = f"{minutes}m {seconds}s"
+                duration_str = f"{minutes}m {seconds}s"
             else:
-                connection_duration = f"{seconds}s"
-        else:
-            connection_duration = None
+                duration_str = f"{seconds}s"
+                
+            client_list.append({
+                'status': 'connected',
+                'ip': ip,
+                'time_label': 'Since',
+                'time_val': time_str,
+                'duration': duration_str,
+                'timestamp_raw': conn_time.timestamp()
+            })
+
+        # Add Disconnected Clients
+        for (ip, cid), (conn_time, disc_time) in safety_monitor.disconnected_clients.items():
+            try:
+                tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
+                local_disc_time = disc_time.astimezone(tz)
+                disc_time_str = local_disc_time.strftime('%H:%M:%S')
+                disc_date_str = local_disc_time.strftime('%Y-%m-%d')
+            except Exception:
+                disc_time_str = disc_time.strftime('%H:%M:%S')
+                disc_date_str = disc_time.strftime('%Y-%m-%d')
+                
+            # Calculate duration
+            duration = disc_time - conn_time
+            hours, remainder = divmod(int(duration.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            if hours > 0:
+                duration_str = f"{hours}h {minutes}m {seconds}s"
+            elif minutes > 0:
+                duration_str = f"{minutes}m {seconds}s"
+            else:
+                duration_str = f"{seconds}s"
+            
+            client_list.append({
+                'status': 'disconnected',
+                'ip': ip,
+                'time_label': 'Disconnected at',
+                'time_val': disc_time_str,
+                'duration': duration_str,
+                'timestamp_raw': disc_time.timestamp()
+            })
+            
+        # Sort by timestamp descending
+        client_list.sort(key=lambda x: x['timestamp_raw'], reverse=True)
+            
+    if is_connected:
+        ascom_status = 'Connected'
+        ascom_status_class = 'status-connected'
     else:
         ascom_status = 'Disconnected'
         ascom_status_class = 'status-disconnected'
-        connection_duration = None
-        if safety_monitor.last_session_duration is not None:
-            duration = safety_monitor.last_session_duration
-            hours, remainder = divmod(int(duration), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            if hours > 0:
-                last_session_duration_str = f"{hours}h {minutes}m {seconds}s"
-            elif minutes > 0:
-                last_session_duration_str = f"{minutes}m {seconds}s"
-            else:
-                last_session_duration_str = f"{seconds}s"
-    
-    # Format last connected/disconnected timestamps with current timezone
-    last_connected = None
-    if safety_monitor.last_connected_at:
-        # Convert to current timezone if different
-        try:
-            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
-            converted_time = safety_monitor.last_connected_at.astimezone(tz)
-            last_connected = converted_time.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            last_connected = safety_monitor.last_connected_at.strftime('%Y-%m-%d %H:%M:%S')
-    
-    last_disconnected = None
-    if safety_monitor.disconnected_at:
-        # Convert to current timezone if different
-        try:
-            tz = ZoneInfo(safety_monitor.alpaca_config.timezone)
-            converted_time = safety_monitor.disconnected_at.astimezone(tz)
-            last_disconnected = converted_time.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            last_disconnected = safety_monitor.disconnected_at.strftime('%Y-%m-%d %H:%M:%S')
     
     # Prepare ASCOM safe/unsafe status display
     ascom_safe_status = 'SAFE' if safety_monitor._stable_safe_state else 'UNSAFE'
@@ -2634,11 +2732,8 @@ def setup_device(device_number: int):
         ascom_safe_status=ascom_safe_status,
         ascom_safe_color=ascom_safe_color,
         safety_history=safety_history,
-        connection_duration=connection_duration,
-        last_session_duration=last_session_duration_str,
-        client_ip=safety_monitor.client_ip,
-        last_connected=last_connected,
-        last_disconnected=last_disconnected,
+        client_list=client_list,
+        client_count=client_count,
         detection_interval=safety_monitor.alpaca_config.detection_interval,
         update_interval=safety_monitor.alpaca_config.update_interval,
         debounce_to_safe=safety_monitor.alpaca_config.debounce_to_safe_sec,
@@ -2793,7 +2888,7 @@ def main():
     logger.info("Press Ctrl+C to stop the server")
     
     try:
-        serve(app, host='0.0.0.0', port=alpaca_config.port, threads=6)
+        serve(app, host='0.0.0.0', port=alpaca_config.port, threads=32)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
         handle_shutdown_signal(signal.SIGINT, None)
