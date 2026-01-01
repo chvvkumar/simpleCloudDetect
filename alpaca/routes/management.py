@@ -4,6 +4,7 @@ Management/Setup Routes Blueprint
 import os
 from flask import Blueprint, render_template, request, redirect, url_for
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import logging
 from ..device import AlpacaSafetyMonitor
 from ..config import ALL_CLOUD_CONDITIONS, get_current_time
@@ -105,37 +106,75 @@ def setup_device(device_number: int):
     with monitor.connection_lock:
         for (ip, client_id), conn_time in monitor.connected_clients.items():
             duration = (get_current_time(monitor.alpaca_config.timezone) - conn_time).total_seconds()
+            
+            try:
+                # Convert timestamp to current timezone
+                tz = ZoneInfo(monitor.alpaca_config.timezone)
+                local_conn_time = conn_time.astimezone(tz)
+                conn_time_str = local_conn_time.strftime("%H:%M:%S")
+                conn_ts = local_conn_time.timestamp()
+            except Exception:
+                # Fallback if timezone conversion fails
+                conn_time_str = conn_time.strftime("%H:%M:%S")
+                conn_ts = conn_time.timestamp()
+            
             client_list.append({
                 'ip': ip,
                 'status': 'connected',
                 'duration': f"{int(duration)}s",
                 'duration_seconds': duration,
-                'connected_time': conn_time.strftime("%H:%M:%S"),
-                'connected_ts': conn_time.timestamp(),
+                'connected_time': conn_time_str,
+                'connected_ts': conn_ts,
                 'disconnected_time': '-',
                 'disconnected_ts': 0
             })
         
         for (ip, client_id), (conn_time, disc_time) in monitor.disconnected_clients.items():
             duration = (disc_time - conn_time).total_seconds()
+            
+            try:
+                # Convert timestamps to current timezone
+                tz = ZoneInfo(monitor.alpaca_config.timezone)
+                local_conn_time = conn_time.astimezone(tz)
+                local_disc_time = disc_time.astimezone(tz)
+                conn_time_str = local_conn_time.strftime("%H:%M:%S")
+                disc_time_str = local_disc_time.strftime("%H:%M:%S")
+                conn_ts = local_conn_time.timestamp()
+                disc_ts = local_disc_time.timestamp()
+            except Exception:
+                # Fallback if timezone conversion fails
+                conn_time_str = conn_time.strftime("%H:%M:%S")
+                disc_time_str = disc_time.strftime("%H:%M:%S")
+                conn_ts = conn_time.timestamp()
+                disc_ts = disc_time.timestamp()
+            
             client_list.append({
                 'ip': ip,
                 'status': 'disconnected',
                 'duration': f"{int(duration)}s",
                 'duration_seconds': duration,
-                'connected_time': conn_time.strftime("%H:%M:%S"),
-                'connected_ts': conn_time.timestamp(),
-                'disconnected_time': disc_time.strftime("%H:%M:%S"),
-                'disconnected_ts': disc_time.timestamp()
+                'connected_time': conn_time_str,
+                'connected_ts': conn_ts,
+                'disconnected_time': disc_time_str,
+                'disconnected_ts': disc_ts
             })
     
     # Safety history
     safety_history = []
     with monitor.detection_lock:
         for entry in list(monitor._safety_history)[-10:]:  # Last 10 entries
+            try:
+                # Convert timestamp to current timezone
+                tz = ZoneInfo(monitor.alpaca_config.timezone)
+                converted_time = entry['timestamp'].astimezone(tz)
+                time_str = converted_time.strftime("%H:%M:%S")
+            except Exception:
+                # Fallback if timezone conversion fails
+                time_str = entry['timestamp'].strftime("%H:%M:%S")
+            
             safety_history.append({
                 'is_safe': entry['is_safe'],
-                'time': entry['timestamp'].strftime("%H:%M:%S"),
+                'time': time_str,
                 'condition': entry['condition'],
                 'confidence': round(entry['confidence'], 1)
             })
