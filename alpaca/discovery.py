@@ -28,6 +28,9 @@ class AlpacaDiscovery:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
+            # Set timeout to allow checking self.running periodically
+            self.socket.settimeout(1.0)
+            
             # Bind to all interfaces on discovery port
             self.socket.bind(('', self.DISCOVERY_PORT))
             
@@ -35,7 +38,7 @@ class AlpacaDiscovery:
             self.thread = threading.Thread(target=self._discovery_loop, daemon=True)
             self.thread.start()
             
-            logger.info(f"Alpaca Discovery service started on UDP port {self.DISCOVERY_PORT}")
+            logger.info(f"Alpaca Discovery service started on UDP port {self.DISCOVERY_PORT}, advertising HTTP port {self.alpaca_port}")
         except Exception as e:
             logger.error(f"Failed to start discovery service: {e}")
             logger.warning("Discovery will not be available, but HTTP API will still work")
@@ -55,11 +58,16 @@ class AlpacaDiscovery:
         
         while self.running:
             try:
-                # Receive discovery request
-                data, addr = self.socket.recvfrom(1024)
+                # Receive discovery request (with timeout to check self.running)
+                try:
+                    data, addr = self.socket.recvfrom(1024)
+                except socket.timeout:
+                    continue  # Timeout allows us to check self.running
+                
+                logger.debug(f"Received UDP packet from {addr[0]}:{addr[1]}: {data}")
                 
                 if data == self.DISCOVERY_MESSAGE:
-                    logger.info(f"Discovery request from {addr[0]}:{addr[1]}")
+                    logger.info(f"Valid Alpaca discovery request from {addr[0]}:{addr[1]}")
                     self._send_discovery_response(addr)
                 else:
                     logger.debug(f"Ignored non-discovery message from {addr}: {data}")
@@ -71,14 +79,16 @@ class AlpacaDiscovery:
     def _send_discovery_response(self, addr):
         """Send discovery response to client"""
         try:
-            # Build discovery response per ASCOM spec
+            # Build discovery response per ASCOM Alpaca Discovery spec
+            # Must include AlpacaPort at minimum, ServerName is recommended
             response = {
-                "AlpacaPort": self.alpaca_port
+                "AlpacaPort": self.alpaca_port,
+                "ServerName": "SimpleCloudDetect"
             }
             
             response_json = json.dumps(response).encode('utf-8')
             self.socket.sendto(response_json, addr)
-            logger.info(f"Sent discovery response to {addr[0]}:{addr[1]} - Port: {self.alpaca_port}")
+            logger.info(f"Sent discovery response to {addr[0]}:{addr[1]} - Port: {self.alpaca_port}, ServerName: SimpleCloudDetect")
             
         except Exception as e:
             logger.error(f"Failed to send discovery response: {e}")
