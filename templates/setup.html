@@ -1,0 +1,1559 @@
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>SimpleCloudDetect Setup - Command Center</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+        <style>
+            /* Typography Imports */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+            /* Custom Scrollbar */
+            ::-webkit-scrollbar { width: 6px; }
+            ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.2); }
+            ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.5); border-radius: 4px; }
+            ::-webkit-scrollbar-thumb:hover { background: rgba(71, 85, 105, 0.8); }
+
+            /* Glassmorphism Utility */
+            .glass-panel {
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            /* Input Glow Effect */
+            .glow-input:focus {
+                box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: rgb(2, 6, 23);
+                min-height: 100vh;
+                padding: 20px;
+                color: rgb(226, 232, 240);
+                position: relative;
+            }
+            
+            /* Background Overlay */
+            body::before {
+                content: '';
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: linear-gradient(to right, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.4));
+                pointer-events: none;
+                z-index: 0;
+            }
+            
+            .container {
+                max-width: 1400px;
+                margin: 50px auto;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .header {
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                padding: 32px 30px;
+                text-align: left;
+                position: relative;
+                margin-bottom: 24px;
+                box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
+            }
+            
+            .github-btn {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: rgba(6, 182, 212, 0.15);
+                color: rgb(255, 255, 255);
+                padding: 10px 20px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.3s ease;
+                border: 2px solid rgba(6, 182, 212, 0.6);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .github-btn:hover {
+                background: rgba(6, 182, 212, 0.25);
+                border-color: rgb(6, 182, 212);
+                transform: translateY(-2px);
+                color: rgb(34, 211, 238);
+            }
+            
+            h1 {
+                color: #ffffff;
+                font-size: 32px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                margin: 0;
+                text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+            }
+            
+            h1 .highlight {
+                color: rgb(34, 211, 238);
+            }
+            
+            .main-content {
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                padding: 32px;
+                box-shadow: 0 0 20px rgba(8, 145, 178, 0.1);
+                margin-bottom: 24px;
+            }
+            
+            .section {
+                margin-bottom: 32px;
+            }
+            
+            .section:last-child {
+                margin-bottom: 0;
+            }
+            
+            .section-header {
+                color: #ffffff;
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                margin: 0 0 16px 0;
+                text-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+                border-bottom: 2px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 10px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .section-header .icon {
+                font-size: 24px;
+            }
+            
+            .section-header .highlight {
+                color: rgb(34, 211, 238);
+            }
+            
+            .status-grid {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+            
+            .status-card {
+                background: rgba(10, 15, 24, 0.9);
+                padding: 16px;
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .status-card-large {
+                background: transparent;
+                padding: 24px;
+            }
+            
+            .status-card-title {
+                color: rgb(34, 211, 238);
+                font-weight: 600;
+                font-size: 14px;
+                margin-bottom: 10px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .detection-title {
+                font-size: 18px;
+                color: rgb(34, 211, 238);
+                font-weight: 700;
+            }
+            
+            .detection-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 16px;
+                margin-top: 16px;
+            }
+            
+            .detection-item {
+                background: rgba(15, 23, 42, 0.6);
+                padding: 14px;
+                border-radius: 6px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .detection-label {
+                color: rgb(148, 163, 184);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 6px;
+            }
+            
+            .detection-value {
+                color: rgb(226, 232, 240);
+                font-size: 20px;
+                font-weight: 700;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .detection-sub {
+                color: rgb(100, 116, 139);
+                font-size: 11px;
+                margin-top: 4px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .collapsible-btn {
+                width: 100%;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                color: rgb(226, 232, 240);
+                padding: 14px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+                text-align: left;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                transition: all 0.2s ease;
+                margin: 0;
+                text-transform: none;
+                letter-spacing: 0;
+            }
+            
+            .collapsible-btn:hover {
+                background: rgba(15, 23, 42, 0.8);
+                border-color: rgba(71, 85, 105, 0.8);
+                transform: none;
+            }
+            
+            .collapsible-btn .icon {
+                font-size: 16px;
+            }
+            
+            .collapsible-btn .arrow {
+                transition: transform 0.2s ease;
+                font-size: 12px;
+            }
+            
+            .collapsible-btn.active .arrow {
+                transform: rotate(180deg);
+            }
+            
+            .collapsible-content {
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+                background: rgba(10, 15, 24, 0.6);
+                border-radius: 0 0 6px 6px;
+                margin-top: -1px;
+            }
+            
+            .collapsible-content.open {
+                max-height: 3000px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                border-top: none;
+            }
+            
+            .collapsible-inner {
+                padding: 16px;
+            }
+            
+            .status-card p {
+                margin: 6px 0;
+                color: rgb(148, 163, 184);
+                line-height: 1.6;
+                font-size: 13px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .status-card strong {
+                color: rgb(226, 232, 240);
+                font-weight: 600;
+            }
+            
+            .param-guide {
+                background: linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, rgba(6, 182, 212, 0.02) 100%);
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(6, 182, 212, 0.2);
+            }
+            
+            .param-guide-title {
+                color: rgb(34, 211, 238);
+                font-weight: 700;
+                font-size: 16px;
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .param-item {
+                margin: 12px 0;
+                padding: 12px;
+                background: rgba(15, 23, 42, 0.4);
+                border-left: 3px solid;
+                border-radius: 4px;
+            }
+            
+            .param-item.safe {
+                border-color: rgb(52, 211, 153);
+            }
+            
+            .param-item.unsafe {
+                border-color: rgb(248, 113, 113);
+            }
+            
+            .param-item.threshold {
+                border-color: rgb(251, 191, 36);
+            }
+            
+            .param-item strong {
+                display: block;
+                font-size: 13px;
+                margin-bottom: 4px;
+                font-weight: 600;
+            }
+            
+            .param-item.safe strong {
+                color: rgb(52, 211, 153);
+            }
+            
+            .param-item.unsafe strong {
+                color: rgb(248, 113, 113);
+            }
+            
+            .param-item.threshold strong {
+                color: rgb(251, 191, 36);
+            }
+            
+            .param-item span {
+                color: rgb(148, 163, 184);
+                font-size: 12px;
+                line-height: 1.5;
+                font-family: 'Inter', sans-serif;
+            }
+            
+            .input-group {
+                margin-bottom: 20px;
+            }
+            
+            .input-group:last-child {
+                margin-bottom: 0;
+            }
+            
+            .input-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-bottom: 16px;
+            }
+            
+            @media (max-width: 768px) {
+                .input-row {
+                    grid-template-columns: 1fr;
+                }
+                
+                .input-group > div[style*="grid-template-columns: 1fr 1fr"] {
+                    grid-template-columns: 1fr !important;
+                }
+                
+                /* Stack status cards on mobile */
+                .status-grid > div[style*="grid-template-columns: 1fr 2fr 1fr"] {
+                    grid-template-columns: 1fr !important;
+                }
+            }
+            
+            @media (max-width: 1200px) {
+                .section > div[style*="grid-template-columns"] {
+                    grid-template-columns: 1fr !important;
+                }
+                
+                .param-guide {
+                    position: static !important;
+                    margin-bottom: 24px;
+                }
+            }
+                color: rgb(34, 211, 238);
+                margin-top: 30px;
+                margin-bottom: 15px;
+                font-size: 20px;
+                font-weight: 600;
+                letter-spacing: -0.25px;
+                text-transform: uppercase;
+                font-size: 14px;
+                border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 8px;
+            }
+            
+            .form-group {
+                margin-bottom: 24px;
+            }
+            
+            label {
+                display: block;
+                margin-bottom: 8px;
+                color: rgb(148, 163, 184);
+                font-weight: 500;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            
+            input[type="text"] {
+                width: 100%;
+                padding: 12px 14px;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgb(71, 85, 105);
+                border-radius: 6px;
+                color: rgb(241, 245, 249);
+                font-size: 14px;
+                font-family: 'Inter', sans-serif;
+                transition: all 0.3s ease;
+            }
+            
+            input[type="text"]:focus {
+                outline: none;
+                border-color: rgb(6, 182, 212);
+                background: rgba(15, 23, 42, 0.8);
+                box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+            }
+            
+            input[type="text"]::placeholder {
+                color: rgb(100, 116, 139);
+            }
+            
+            .checkbox-group {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 12px;
+                padding: 20px;
+                background: rgba(10, 15, 24, 0.9);
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .checkbox-item {
+                display: flex;
+                align-items: center;
+                padding: 12px 14px;
+                background: rgba(15, 23, 42, 0.6);
+                backdrop-filter: blur(12px);
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                transition: all 0.3s ease;
+            }
+            
+            .checkbox-item:hover {
+                background: rgba(6, 182, 212, 0.1);
+                border-color: rgba(6, 182, 212, 0.5);
+                box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+            }
+            
+            .checkbox-item input[type="checkbox"] {
+                margin-right: 12px;
+                width: 18px;
+                height: 18px;
+                cursor: pointer;
+                accent-color: rgb(6, 182, 212);
+            }
+            
+            .checkbox-item label {
+                margin: 0;
+                font-weight: 400;
+                cursor: pointer;
+                color: rgb(226, 232, 240);
+                font-size: 14px;
+                text-transform: none;
+                letter-spacing: 0;
+            }
+            
+            /* Safety Configuration Boxes */
+            .safety-box {
+                background: rgba(10, 15, 24, 0.9);
+                border-radius: 8px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+                overflow: hidden;
+            }
+            
+            .safety-box-header {
+                padding: 16px;
+                font-weight: 600;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                border-bottom: 2px solid;
+            }
+            
+            .safe-box {
+                border-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .safe-header {
+                background: rgba(52, 211, 153, 0.1);
+                color: rgb(52, 211, 153);
+                border-bottom-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .unsafe-box {
+                border-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            .unsafe-header {
+                background: rgba(248, 113, 113, 0.1);
+                color: rgb(248, 113, 113);
+                border-bottom-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            .safety-box-content {
+                padding: 16px;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            
+            .condition-item {
+                padding: 12px;
+                margin-bottom: 12px;
+                background: rgba(15, 23, 42, 0.6);
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                transition: all 0.3s ease;
+            }
+            
+            .condition-item:last-child {
+                margin-bottom: 0;
+            }
+            
+            .safe-condition:hover {
+                background: rgba(52, 211, 153, 0.05);
+                border-color: rgba(52, 211, 153, 0.3);
+            }
+            
+            .unsafe-condition:hover {
+                background: rgba(248, 113, 113, 0.05);
+                border-color: rgba(248, 113, 113, 0.3);
+            }
+            
+            button {
+                background: rgba(6, 182, 212, 0.7);
+                color: rgb(226, 232, 240);
+                padding: 12px 24px;
+                border: 1px solid rgba(6, 182, 212, 0.5);
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                width: 100%;
+                margin-top: 24px;
+                transition: all 0.3s ease;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            
+            button:hover {
+                background: rgba(6, 182, 212, 0.85);
+                border-color: rgb(6, 182, 212);
+                transform: translateY(-1px);
+            }
+            
+            button:active {
+                transform: scale(0.98);
+            }
+            
+            .message {
+                background: rgba(16, 185, 129, 0.1);
+                color: rgb(52, 211, 153);
+                padding: 14px 16px;
+                border-radius: 6px;
+                margin-bottom: 20px;
+                font-weight: 500;
+                font-size: 14px;
+                border: 1px solid rgba(16, 185, 129, 0.3);
+                animation: slideIn 0.3s ease;
+            }
+            
+            @keyframes slideIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            .info {
+                background: rgba(10, 15, 24, 0.9);
+                padding: 18px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(71, 85, 105, 0.5);
+            }
+            
+            .info p {
+                margin: 8px 0;
+                color: rgb(148, 163, 184);
+                line-height: 1.8;
+                font-size: 14px;
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .info strong {
+                color: rgb(226, 232, 240);
+                font-weight: 600;
+            }
+            
+            .info-title {
+                color: rgb(34, 211, 238);
+                font-weight: 600;
+                font-size: 16px;
+                margin-bottom: 12px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+                padding-bottom: 6px;
+            }
+            
+            .help-text {
+                font-size: 12px;
+                color: rgb(100, 116, 139);
+                margin-top: 6px;
+                margin-bottom: 12px;
+            }
+            
+            .safe-indicator {
+                color: rgb(52, 211, 153);
+                font-weight: 600;
+            }
+            
+            .unsafe-indicator {
+                color: rgb(248, 113, 113);
+                font-weight: 600;
+            }
+            
+            .status-connected {
+                color: rgb(52, 211, 153);
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+            
+            .status-disconnected {
+                color: rgb(248, 113, 113);
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+            
+            /* Terminal/Console Styling */
+            .terminal-line {
+                color: rgb(100, 116, 139);
+                font-family: 'JetBrains Mono', monospace;
+            }
+            
+            .terminal-line .prompt {
+                color: rgb(34, 211, 238);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <a href="https://github.com/chvvkumar/simpleCloudDetect" target="_blank" class="github-btn">
+                    GitHub
+                    <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                </a>
+                <h1>☁️ Simple<span class="highlight">Cloud</span>Detect</h1>
+            </div>
+            
+            <div class="main-content">
+                {% if message %}
+                <div class="message">✓ {{ message }}</div>
+                {% endif %}
+                
+                <!-- Status Overview Section -->
+                <div class="section">
+                    <div class="section-header" style="justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span class="icon">🤖</span>
+                            <span>System <span class="highlight">Status</span></span>
+                        </div>
+                        <div style="font-size: 14px; font-weight: 400; color: rgb(148, 163, 184); font-family: 'JetBrains Mono', monospace; text-shadow: none; letter-spacing: 0;">
+                            {{ current_name }} <span style="margin: 0 8px; opacity: 0.5;">|</span> {{ current_location }}
+                        </div>
+                    </div>
+                    
+                    <div class="status-grid">
+                        <!-- Current Detection - Prominent -->
+                        <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 16px;">
+                            <!-- Latest Detection Image -->
+                            <div class="status-card">
+                                <div class="status-card-title">📷 Latest Image</div>
+                                <div style="display: flex; justify-content: center; align-items: center; padding: 8px; min-height: 250px;">
+                                    <img id="latest-image" src="/api/v1/latest_image?t={{ last_update }}" 
+                                         alt="Latest Detection" 
+                                         style="width: 100%; height: 100%; object-fit: contain; border-radius: 6px; border: 1px solid rgba(71, 85, 105, 0.5);"
+                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                    <div style="display: none; justify-content: center; align-items: center; text-align: center; color: rgb(148, 163, 184); font-size: 12px; padding: 20px; width: 100%; height: 100%;">
+                                        No image available
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Current Detection - Prominent -->
+                            <div class="status-card status-card-large">
+                                <div class="detection-grid" style="margin-top: 0; height: 100%;">
+                                    <div class="detection-item">
+                                        <div class="detection-label">Condition</div>
+                                        <div class="detection-value">{{ current_condition }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Confidence</div>
+                                        <div class="detection-value">{{ current_confidence }}%</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">ASCOM Status</div>
+                                        <div class="detection-value" style="color: {{ ascom_safe_color }};">{{ ascom_safe_status }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Detection Time</div>
+                                        <div class="detection-value">{{ detection_time }}s</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Last Updated</div>
+                                        <div class="detection-value" style="font-size: 14px;">{{ last_update }}</div>
+                                    </div>
+                                    <div class="detection-item">
+                                        <div class="detection-label">Container Uptime</div>
+                                        <div class="detection-value" style="font-size: 14px;">{{ container_uptime }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Safety State History -->
+                            <div class="status-card">
+                                <div class="status-card-title">📜 Safety History</div>
+                                <div style="max-height: 250px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+                                    {% if safety_history %}
+                                        {% for entry in safety_history %}
+                                        <div style="padding: 4px 8px; border-bottom: 1px solid rgba(71, 85, 105, 0.3); display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="color: {{ 'rgb(52, 211, 153)' if entry.is_safe else 'rgb(248, 113, 113)' }}; font-weight: 600;">
+                                                {{ '✓ SAFE' if entry.is_safe else '⚠ UNSAFE' }}
+                                            </span>
+                                            <span style="color: rgb(148, 163, 184); font-size: 10px;">{{ entry.time }}</span>
+                                        </div>
+                                        <div style="padding: 2px 8px 6px 8px; font-size: 10px; color: rgb(148, 163, 184);">
+                                            {{ entry.condition }} ({{ entry.confidence }}%)
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div style="padding: 12px; text-align: center; color: rgb(148, 163, 184); font-size: 12px;">
+                                            No state changes yet
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- ASCOM Connection - Full Width -->
+                        <div>
+                            <!-- Client Connection - Collapsible -->
+                            <div>
+                                <button class="collapsible-btn" onclick="toggleCollapsible('ascom-details')">
+                                    <span><span class="icon">🔭</span> ASCOM Clients: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span></span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="ascom-details" class="collapsible-content">
+                                    <div class="collapsible-inner">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                            <p style="margin: 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                Status: <span class="{{ ascom_status_class }}">{{ ascom_status }}</span>
+                                            </p>
+                                            <p style="margin: 0; color: rgb(148, 163, 184); font-size: 13px; font-family: 'JetBrains Mono', monospace;">
+                                                Active: <strong style="color: rgb(226, 232, 240);">{{ client_count }}</strong>
+                                            </p>
+                                        </div>
+
+                                        {% if client_list %}
+                                        <div style="max-height: 250px; overflow-y: auto; border: 1px solid rgba(71, 85, 105, 0.3); border-radius: 6px;">
+                                            <table id="clientTable" style="width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+                                                <thead>
+                                                    <tr style="background: rgba(15, 23, 42, 0.8); position: sticky; top: 0; z-index: 10;">
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">IP ↕</th>
+                                                        <th style="padding: 8px; text-align: center; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">Status ↕</th>
+                                                        <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(2)">Duration ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Connected ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(4)">Disconnected ↕</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for client in client_list %}
+                                                    <tr style="border-bottom: 1px solid rgba(71, 85, 105, 0.2); transition: background 0.2s;">
+                                                        <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
+                                                        <td style="padding: 8px; color: {{ 'rgb(52, 211, 153)' if client.status == 'connected' else 'rgb(148, 163, 184)' }}; text-align: center;" data-sort="{{ 1 if client.status == 'connected' else 0 }}">
+                                                            {{ '●' if client.status == 'connected' else '○' }}
+                                                        </td>
+                                                        <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);" data-sort="{{ client.duration_seconds }}">{{ client.duration }}</td>
+                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.connected_ts }}">{{ client.connected_time }}</td>
+                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.disconnected_ts }}">{{ client.disconnected_time }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <script>
+                function sortClientTable(n) {
+                    var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+                    table = document.getElementById("clientTable");
+                    if (!table) return;
+                    switching = true;
+                    dir = "asc"; 
+                    while (switching) {
+                        switching = false;
+                        rows = table.rows;
+                        for (i = 1; i < (rows.length - 1); i++) {
+                            shouldSwitch = false;
+                            x = rows[i].getElementsByTagName("TD")[n];
+                            y = rows[i + 1].getElementsByTagName("TD")[n];
+                            
+                            var xVal = x.getAttribute("data-sort");
+                            var yVal = y.getAttribute("data-sort");
+                            
+                            if (xVal !== null && yVal !== null) {
+                                xVal = parseFloat(xVal);
+                                yVal = parseFloat(yVal);
+                            } else {
+                                xVal = x.textContent.toLowerCase();
+                                yVal = y.textContent.toLowerCase();
+                            }
+                            
+                            if (dir == "asc") {
+                                if (xVal > yVal) { shouldSwitch = true; break; }
+                            } else if (dir == "desc") {
+                                if (xVal < yVal) { shouldSwitch = true; break; }
+                            }
+                        }
+                        if (shouldSwitch) {
+                            rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                            switching = true;
+                            switchcount ++; 
+                        } else {
+                            if (switchcount == 0 && dir == "asc") {
+                                dir = "desc";
+                                switching = true;
+                            }
+                        }
+                    }
+                }
+
+                function toggleCollapsible(id) {
+                    const content = document.getElementById(id);
+                    const btn = content.previousElementSibling;
+                    
+                    if (content.classList.contains('open')) {
+                        content.classList.remove('open');
+                        btn.classList.remove('active');
+                    } else {
+                        content.classList.add('open');
+                        btn.classList.add('active');
+                    }
+                }
+                
+                // Auto-refresh system status
+                function updateSystemStatus() {
+                    fetch(window.location.href)
+                        .then(response => response.text())
+                        .then(html => {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(html, 'text/html');
+                            
+                            // Update Current Detection - all fields including Detection Time and Last Updated
+                            const detectionGrid = document.querySelector('.detection-grid');
+                            const newDetectionGrid = doc.querySelector('.detection-grid');
+                            if (detectionGrid && newDetectionGrid) {
+                                detectionGrid.innerHTML = newDetectionGrid.innerHTML;
+                            }
+                            
+                            // Update Safety History - find by looking for the title text
+                            const statusCards = document.querySelectorAll('.status-card');
+                            const newStatusCards = doc.querySelectorAll('.status-card');
+                            
+                            statusCards.forEach((card, index) => {
+                                const title = card.querySelector('.status-card-title');
+                                if (title && title.textContent.includes('📜 Safety History')) {
+                                    const scrollableDiv = card.querySelector('div[style*="overflow-y"]');
+                                    const oldScrollTop = scrollableDiv ? scrollableDiv.scrollTop : 0;
+                                    
+                                    const newCard = newStatusCards[index];
+                                    if (newCard) {
+                                        card.innerHTML = newCard.innerHTML;
+                                        const newScrollableDiv = card.querySelector('div[style*="overflow-y"]');
+                                        if (newScrollableDiv) {
+                                            newScrollableDiv.scrollTop = oldScrollTop;
+                                        }
+                                    }
+                                }
+                            });
+                            
+                            // Update ASCOM Connection details including Duration
+                            const ascomDetails = document.getElementById('ascom-details');
+                            const newAscomDetails = doc.getElementById('ascom-details');
+                            if (ascomDetails && newAscomDetails) {
+                                const wasOpen = ascomDetails.classList.contains('open');
+                                ascomDetails.innerHTML = newAscomDetails.innerHTML;
+                                if (wasOpen) {
+                                    ascomDetails.classList.add('open');
+                                }
+                            }
+                            
+                            // Update ASCOM Connection button status text
+                            const ascomButton = document.querySelector('button[onclick*="ascom-details"]');
+                            const newAscomButton = doc.querySelector('button[onclick*="ascom-details"]');
+                            if (ascomButton && newAscomButton) {
+                                const statusSpan = ascomButton.querySelector('span[class*="status-"]');
+                                const newStatusSpan = newAscomButton.querySelector('span[class*="status-"]');
+                                if (statusSpan && newStatusSpan) {
+                                    statusSpan.className = newStatusSpan.className;
+                                    statusSpan.textContent = newStatusSpan.textContent;
+                                }
+                            }
+                            
+                            // Update Latest Image - refresh with timestamp to avoid cache
+                            const latestImage = document.getElementById('latest-image');
+                            if (latestImage) {
+                                const timestamp = new Date().getTime();
+                                latestImage.src = '/api/v1/latest_image?t=' + timestamp;
+                            }
+                        })
+                        .catch(error => console.error('Error updating status:', error));
+                }
+                
+                // Update every 5 seconds
+                setInterval(updateSystemStatus, 5000);
+                </script>
+                
+                <!-- Configuration Form Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="icon">🛠️</span>
+                        <span>Configuration <span class="highlight">Settings</span></span>
+                    </div>
+                    
+                    <form method="POST">
+                                <!-- Parameter Guide (moved from sidebar) -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('param-guide')">
+                                        <span><span class="icon">📖</span> Parameter Guide</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="param-guide" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="param-item" style="border-color: rgb(59, 130, 246);">
+                                                <strong style="color: rgb(59, 130, 246);">Image Fetch Interval</strong>
+                                                <span>How often to download new images from AllSky camera and run AI analysis. Lower values = faster response but higher CPU usage.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(59, 130, 246, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(59, 130, 246); font-size: 12px;">Recommended:</strong><br>
+                                                    • Fast response: 15-30s<br>
+                                                    • Balanced: 30-60s<br>
+                                                    • Resource efficient: 60-120s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item" style="border-color: rgb(236, 72, 153);">
+                                                <strong style="color: rgb(236, 72, 153);">ASCOM Update Interval</strong>
+                                                <span>How often to re-check safety status. Should be ≥ Image Fetch Interval.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(236, 72, 153, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(236, 72, 153); font-size: 12px;">Rule:</strong> Set equal to Image Fetch Interval for efficiency.
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item safe">
+                                                <strong>Safe Wait Time</strong>
+                                                <span>How long the sky must remain clear before the system reports "Safe".</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(52, 211, 153, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Why it matters:</strong><br>
+                                                    Prevents opening the observatory roof during brief breaks in storms or passing clouds. 
+                                                    Set higher (e.g., 300s = 5 min) for unstable weather patterns.<br><br>
+                                                    <strong style="color: rgb(52, 211, 153); font-size: 12px;">Recommended:</strong><br>
+                                                    • Stable climate: 60-120s<br>
+                                                    • Variable weather: 180-300s<br>
+                                                    • Storm-prone areas: 300-600s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item unsafe">
+                                                <strong>Unsafe Wait Time (Debounce to Unsafe)</strong>
+                                                <span>How long bad weather must persist before the system reports "Unsafe".</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(248, 113, 113, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Why it matters:</strong><br>
+                                                    Controls emergency response speed. Setting to 0 triggers immediate roof closure at first sign of danger. 
+                                                    Higher values (10-30s) can filter out brief sensor glitches.<br><br>
+                                                    <strong style="color: rgb(248, 113, 113); font-size: 12px;">Recommended:</strong><br>
+                                                    • Automated roof: 0s (immediate)<br>
+                                                    • Manual operation: 5-10s<br>
+                                                    • Glitch filtering: 10-30s
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="param-item threshold">
+                                                <strong>Confidence Threshold</strong>
+                                                <span>Minimum AI confidence (%) required to trigger each weather condition.</span>
+                                            </div>
+                                            <div style="margin: 8px 0 12px 12px; padding: 8px; background: rgba(251, 191, 36, 0.05); border-radius: 4px;">
+                                                <div style="font-size: 11px; color: rgb(148, 163, 184); line-height: 1.5;">
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">📊 Key Concept:</strong><br>
+                                                    <strong>Higher threshold = Less sensitive</strong> (AI must be more confident)<br>
+                                                    <strong>Lower threshold = More sensitive</strong> (AI triggers with less certainty)<br><br>
+                                                    
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">How it works:</strong><br>
+                                                    If set to 80% for "Rain", the AI must be 80% confident it's raining to trigger. 
+                                                    Lower = more sensitive (fewer misses, more false alarms). Higher = less sensitive (more misses, fewer false alarms).<br><br>
+                                                    <strong style="color: rgb(251, 191, 36); font-size: 12px;">Tuning tips:</strong><br>
+                                                    • Start at 50% (default)<br>
+                                                    • Lower for critical conditions (Rain: 40-50%)<br>
+                                                    • Higher for uncertain conditions (Overcast: 60-70%)<br>
+                                                    • Adjust based on false alarm rate
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Basic Settings -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('basic-settings')">
+                                        <span><span class="icon">⚙️</span> Basic Settings</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="basic-settings" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="device_name">Device Name</label>
+                                                        <input type="text" id="device_name" name="device_name" class="glow-input"
+                                                               value="{{ current_name }}" placeholder="Enter device name">
+                                                    </div>
+                                                    
+                                                    <div class="form-group">
+                                                        <label for="location">Location</label>
+                                                        <input type="text" id="location" name="location" class="glow-input"
+                                                               value="{{ current_location }}" placeholder="Enter location">
+                                                    </div>
+                                                </div>
+                                                <div class="input-row">
+                                                    <div class="form-group" style="grid-column: span 2;">
+                                                        <label for="image_url">Image Source URL</label>
+                                                        <input type="text" id="image_url" name="image_url" class="glow-input"
+                                                               value="{{ current_image_url }}" placeholder="{{ image_url_default }}">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            URL to fetch images for cloud detection. Leave empty to use environment variable default.
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="ntp_server">NTP Server</label>
+                                                        <input type="text" id="ntp_server" name="ntp_server" class="glow-input"
+                                                               value="{{ current_ntp_server }}" placeholder="pool.ntp.org">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Time server for accurate timestamps
+                                                        </small>
+                                                    </div>
+                                                    
+                                                    <div class="form-group">
+                                                        <label for="timezone">Timezone</label>
+                                                        <input type="text" id="timezone" name="timezone" class="glow-input"
+                                                               value="{{ current_timezone }}" placeholder="UTC">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            e.g., America/New_York, Europe/London, UTC
+                                                            <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" style="color: rgb(6, 182, 212); text-decoration: none; margin-left: 8px;">📖 Reference</a>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Timing Configuration -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('timing-config')">
+                                        <span><span class="icon">⏱️</span> Timing Configuration</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="timing-config" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                    
+                                    <!-- How It Works Visualization -->
+                                    <div style="margin-bottom: 24px; padding: 20px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgb(51, 65, 85); border-radius: 8px;">
+                                        <h3 style="color: rgb(226, 232, 240); font-size: 14px; font-weight: 600; margin-bottom: 16px;">How Timing Works</h3>
+                                        
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                                            <!-- Fetch Image Card -->
+                                            <div style="background: rgba(59, 130, 246, 0.1); border: 2px solid rgba(59, 130, 246, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(59, 130, 246); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">📷</div>
+                                                    <div>
+                                                        <div style="color: rgb(59, 130, 246); font-weight: 600; font-size: 13px;">FETCH IMAGE</div>
+                                                        <div id="fetch-display" style="color: rgb(148, 163, 184); font-size: 11px;">Every 60s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Downloads latest image from AllSky camera and runs AI analysis to detect weather conditions
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- ASCOM Update Card -->
+                                            <div style="background: rgba(236, 72, 153, 0.1); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(236, 72, 153); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">🔄</div>
+                                                    <div>
+                                                        <div style="color: rgb(236, 72, 153); font-weight: 600; font-size: 13px;">ASCOM UPDATE</div>
+                                                        <div id="ascom-display" style="color: rgb(148, 163, 184); font-size: 11px;">Every 30s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Re-checks safety status using latest detection result and applies debounce logic
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Safe Debounce Card -->
+                                            <div style="background: rgba(52, 211, 153, 0.1); border: 2px solid rgba(52, 211, 153, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(52, 211, 153); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">✓</div>
+                                                    <div>
+                                                        <div style="color: rgb(52, 211, 153); font-weight: 600; font-size: 13px;">SAFE WAIT TIME</div>
+                                                        <div id="safe-display" style="color: rgb(148, 163, 184); font-size: 11px;">60s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    How long sky must <strong>stay clear</strong> before reporting "Safe" - prevents premature roof opening
+                                                </div>
+                                                <div id="safe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(52, 211, 153, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
+                                            
+                                            <!-- Unsafe Debounce Card -->
+                                            <div style="background: rgba(248, 113, 113, 0.1); border: 2px solid rgba(248, 113, 113, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(248, 113, 113); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">⚡</div>
+                                                    <div>
+                                                        <div style="color: rgb(248, 113, 113); font-weight: 600; font-size: 13px;">UNSAFE WAIT TIME</div>
+                                                        <div id="unsafe-display" style="color: rgb(148, 163, 184); font-size: 11px;">Immediate</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    How long bad weather must persist before reporting "Unsafe" - 0 = instant roof closure
+                                                </div>
+                                                <div id="unsafe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(248, 113, 113, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Example Scenario -->
+                                        <div id="scenario-example" style="margin-top: 20px; padding: 16px; background: rgba(30, 41, 59, 0.6); border-radius: 8px; border-left: 4px solid rgb(251, 191, 36);">
+                                            <div style="color: rgb(251, 191, 36); font-weight: 600; font-size: 12px; margin-bottom: 8px;">💡 EXAMPLE SCENARIO</div>
+                                            <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.6;"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="detection_interval">Image Fetch Interval (seconds)</label>
+                                            <input type="number" id="detection_interval" name="detection_interval" 
+                                                   value="{{ detection_interval }}" min="5" max="300" step="1" placeholder="30"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">How often to fetch & analyze new images from AllSky camera</p>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="update_interval">ASCOM Update Interval (seconds)</label>
+                                            <input type="number" id="update_interval" name="update_interval" 
+                                                   value="{{ update_interval }}" min="5" max="300" step="1" placeholder="30"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">How often to check safety status</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="debounce_safe" style="color: rgb(52, 211, 153);">Safe Wait Time (seconds)</label>
+                                            <input type="number" id="debounce_safe" name="debounce_safe" 
+                                                   value="{{ debounce_to_safe }}" min="0" max="3600" step="1" placeholder="60"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Delay before reporting safe conditions</p>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label for="debounce_unsafe" style="color: rgb(248, 113, 113);">Unsafe Wait Time (seconds)</label>
+                                            <input type="number" id="debounce_unsafe" name="debounce_unsafe" 
+                                                   value="{{ debounce_to_unsafe }}" min="0" max="3600" step="1" placeholder="0"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); 
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px; 
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Delay before reporting unsafe conditions (0 = immediate)</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <script>
+                                    function updateTimingVisualization() {
+                                        const detectionInterval = parseInt(document.getElementById('detection_interval').value) || 30;
+                                        const updateInterval = parseInt(document.getElementById('update_interval').value) || 30;
+                                        const debounceSafe = parseInt(document.getElementById('debounce_safe').value) || 60;
+                                        const debounceUnsafe = parseInt(document.getElementById('debounce_unsafe').value) || 0;
+                                        
+                                        // Update displays
+                                        document.getElementById('fetch-display').textContent = `Every ${detectionInterval}s`;
+                                        document.getElementById('ascom-display').textContent = `Every ${updateInterval}s`;
+                                        document.getElementById('safe-display').textContent = debounceSafe > 0 ? `${debounceSafe}s` : 'None';
+                                        document.getElementById('unsafe-display').textContent = debounceUnsafe > 0 ? `${debounceUnsafe}s` : 'Immediate';
+                                        
+                                        // Calculate coverage info
+                                        if (debounceSafe > 0) {
+                                            const checksNeeded = Math.ceil(debounceSafe / detectionInterval);
+                                            document.getElementById('safe-coverage').innerHTML = 
+                                                `<strong>Requires ${checksNeeded} consecutive clear detections</strong> (${checksNeeded} × ${detectionInterval}s = ${checksNeeded * detectionInterval}s)`;
+                                        } else {
+                                            document.getElementById('safe-coverage').textContent = 'Reports safe immediately after first clear detection';
+                                        }
+                                        
+                                        if (debounceUnsafe > 0) {
+                                            const checksNeeded = Math.ceil(debounceUnsafe / detectionInterval);
+                                            document.getElementById('unsafe-coverage').innerHTML = 
+                                                `<strong>Requires ${checksNeeded} consecutive bad detections</strong> (${checksNeeded} × ${detectionInterval}s = ${checksNeeded * detectionInterval}s)`;
+                                        } else {
+                                            document.getElementById('unsafe-coverage').textContent = 'Reports unsafe immediately - closes roof on first bad detection';
+                                        }
+                                        
+                                        // Generate example scenario
+                                        const scenarioDiv = document.querySelector('#scenario-example > div:last-child');
+                                        let scenario = '';
+                                        
+                                        if (updateInterval < detectionInterval) {
+                                            scenario = `⚠️ <strong>Warning:</strong> ASCOM checks every ${updateInterval}s but new data only arrives every ${detectionInterval}s. You'll check the same result ${Math.floor(detectionInterval/updateInterval)} times before getting new data.`;
+                                        } else {
+                                            // Safe scenario
+                                            let safeScenario = '';
+                                            if (debounceSafe > 0) {
+                                                const checksNeeded = Math.ceil(debounceSafe / detectionInterval);
+                                                safeScenario = `Clouds clear at 00:00 → AI detects "Clear" every ${detectionInterval}s → After ${checksNeeded} detections (${checksNeeded * detectionInterval}s total) → Reports <strong style="color: rgb(52, 211, 153);">SAFE</strong> at ${formatTime(checksNeeded * detectionInterval)}`;
+                                            } else {
+                                                safeScenario = `Clouds clear at 00:00 → AI detects "Clear" at ${formatTime(detectionInterval)} → Immediately reports <strong style="color: rgb(52, 211, 153);">SAFE</strong>`;
+                                            }
+                                            
+                                            // Unsafe scenario
+                                            let unsafeScenario = '';
+                                            if (debounceUnsafe > 0) {
+                                                const checksNeeded = Math.ceil(debounceUnsafe / detectionInterval);
+                                                unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" every ${detectionInterval}s → After ${checksNeeded} detections (${checksNeeded * detectionInterval}s total) → Reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> at ${formatTime(checksNeeded * detectionInterval)}`;
+                                            } else {
+                                                unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" at ${formatTime(detectionInterval)} → ⚡ Immediately reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> (roof closes!)`;
+                                            }
+                                            
+                                            scenario = safeScenario + unsafeScenario;
+                                        }
+                                        
+                                        scenarioDiv.innerHTML = scenario;
+                                    }
+                                    
+                                    function formatTime(seconds) {
+                                        const mins = Math.floor(seconds / 60);
+                                        const secs = seconds % 60;
+                                        return mins > 0 ? `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `00:${String(secs).padStart(2, '0')}`;
+                                    }
+                                    </script>
+                                    
+                                    <script>
+                                    // Validate timing configuration for safety
+                                    function validateTiming() {
+                                        // Update timing visualization
+                                        updateTimingVisualization();
+                                    }
+                                    
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const timingInputs = ['detection_interval', 'update_interval', 'debounce_safe', 'debounce_unsafe'];
+                                        timingInputs.forEach(id => {
+                                            const input = document.getElementById(id);
+                                            if (input) {
+                                                input.addEventListener('input', validateTiming);
+                                                input.addEventListener('change', validateTiming);
+                                            }
+                                        });
+                                        validateTiming();
+                                    });
+                                    </script>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Safety Configuration -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('safety-config')">
+                                        <span><span class="icon">🛡️</span> Safety Classification</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="safety-config" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                    <p class="help-text" style="margin-bottom: 16px;">
+                                        Mark each weather condition as <strong style="color: rgb(52, 211, 153);">Safe</strong> or <strong style="color: rgb(248, 113, 113);">Unsafe</strong> for observatory operations.
+                                    </p>
+                                    
+                                    <!-- Safe Conditions -->
+                                    <div id="safe-section" style="margin-bottom: 20px;">
+                                        <h3 style="color: rgb(52, 211, 153); font-size: 14px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Safe Conditions</h3>
+                                        <div id="safe-conditions" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 12px;">
+                                            {% for condition in safe_conditions %}
+                                            <div class="condition-card" data-condition="{{ condition }}" data-safety="safe" style="padding: 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; color: rgb(226, 232, 240); font-size: 14px;">{{ condition }}</div>
+                                                    <div style="display: flex; gap: 16px;">
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="safe" checked 
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(52, 211, 153); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(52, 211, 153); font-weight: 500; font-size: 13px;">Safe</span>
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="unsafe"
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(248, 113, 113); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(248, 113, 113); font-weight: 500; font-size: 13px;">Unsafe</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 80px;">Threshold:</label>
+                                                    <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
+                                                           value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
+                                                           class="threshold-input" data-condition="{{ condition }}"
+                                                           style="width: 60px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184); min-width: 16px;">%</span>
+                                                    
+                                                    <!-- Threshold Bar Visualization -->
+                                                    <div style="flex: 1; position: relative; height: 20px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                        <div id="bar_below_{{ condition }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ class_thresholds.get(condition, default_threshold) }}%; background: rgba(100, 116, 139, 0.4); transition: width 0.2s ease;"></div>
+                                                        <div id="bar_above_{{ condition }}" style="position: absolute; top: 0; bottom: 0; right: 0; width: {{ 100 - class_thresholds.get(condition, default_threshold) }}%; background: rgba(52, 211, 153, 0.6); transition: width 0.2s ease, background 0.2s ease;"></div>
+                                                        <div id="bar_marker_{{ condition }}" style="position: absolute; top: 0; bottom: 0; left: {{ class_thresholds.get(condition, default_threshold) }}%; width: 2px; background: rgb(251, 191, 36); z-index: 10; transition: left 0.2s ease;">
+                                                            <div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: rgb(251, 191, 36); font-size: 9px; font-weight: 600; white-space: nowrap; background: rgba(15, 23, 42, 0.9); padding: 1px 4px; border-radius: 2px;">{{ class_thresholds.get(condition, default_threshold) }}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div style="min-width: 70px; font-size: 10px; color: rgb(148, 163, 184); text-align: right;">
+                                                        <span id="bar_label_{{ condition }}">✓ Triggers >{{ class_thresholds.get(condition, default_threshold) }}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Unsafe Conditions -->
+                                    <div id="unsafe-section">
+                                        <h3 style="color: rgb(248, 113, 113); font-size: 14px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Unsafe Conditions</h3>
+                                        <div id="unsafe-conditions" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px; padding: 12px;">
+                                            {% for condition in unsafe_conditions %}
+                                            <div class="condition-card" data-condition="{{ condition }}" data-safety="unsafe" style="padding: 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; color: rgb(226, 232, 240); font-size: 14px;">{{ condition }}</div>
+                                                    <div style="display: flex; gap: 16px;">
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="safe"
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(52, 211, 153); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(52, 211, 153); font-weight: 500; font-size: 13px;">Safe</span>
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                                            <input type="radio" name="safety_{{ condition }}" value="unsafe" checked
+                                                                   class="safety-radio" data-condition="{{ condition }}"
+                                                                   style="margin: 0; accent-color: rgb(248, 113, 113); width: 16px; height: 16px;">
+                                                            <span style="color: rgb(248, 113, 113); font-weight: 500; font-size: 13px;">Unsafe</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <label for="threshold_{{ condition }}" style="margin: 0; font-size: 11px; color: rgb(148, 163, 184); min-width: 80px;">Threshold:</label>
+                                                    <input type="number" id="threshold_{{ condition }}" name="threshold_{{ condition }}"
+                                                           value="{{ class_thresholds.get(condition, default_threshold) }}" min="0" max="100" step="1" placeholder="{{ default_threshold }}"
+                                                           class="threshold-input" data-condition="{{ condition }}"
+                                                           style="width: 60px; padding: 5px 8px; background: rgba(10, 15, 24, 0.9); border: 1px solid rgb(71, 85, 105); border-radius: 4px; color: rgb(241, 245, 249); font-size: 12px; font-family: 'JetBrains Mono', monospace;">
+                                                    <span style="font-size: 11px; color: rgb(148, 163, 184); min-width: 16px;">%</span>
+                                                    
+                                                    <!-- Threshold Bar Visualization -->
+                                                    <div style="flex: 1; position: relative; height: 20px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);">
+                                                        <div id="bar_below_{{ condition }}" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ class_thresholds.get(condition, default_threshold) }}%; background: rgba(100, 116, 139, 0.4); transition: width 0.2s ease;"></div>
+                                                        <div id="bar_above_{{ condition }}" style="position: absolute; top: 0; bottom: 0; right: 0; width: {{ 100 - class_thresholds.get(condition, default_threshold) }}%; background: rgba(248, 113, 113, 0.6); transition: width 0.2s ease, background 0.2s ease;"></div>
+                                                        <div id="bar_marker_{{ condition }}" style="position: absolute; top: 0; bottom: 0; left: {{ class_thresholds.get(condition, default_threshold) }}%; width: 2px; background: rgb(251, 191, 36); z-index: 10; transition: left 0.2s ease;">
+                                                            <div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: rgb(251, 191, 36); font-size: 9px; font-weight: 600; white-space: nowrap; background: rgba(15, 23, 42, 0.9); padding: 1px 4px; border-radius: 2px;">{{ class_thresholds.get(condition, default_threshold) }}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div style="min-width: 70px; font-size: 10px; color: rgb(148, 163, 184); text-align: right;">
+                                                        <span id="bar_label_{{ condition }}">✓ Triggers >{{ class_thresholds.get(condition, default_threshold) }}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    
+                                    <script>
+                                    // Dynamic sorting when radio buttons change
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        const radios = document.querySelectorAll('.safety-radio');
+                                        const safeContainer = document.getElementById('safe-conditions');
+                                        const unsafeContainer = document.getElementById('unsafe-conditions');
+                                        
+                                        // Update threshold bars dynamically
+                                        const thresholdInputs = document.querySelectorAll('.threshold-input');
+                                        thresholdInputs.forEach(input => {
+                                            input.addEventListener('input', function() {
+                                                updateThresholdBar(this.dataset.condition, parseInt(this.value) || 0);
+                                            });
+                                        });
+                                        
+                                        radios.forEach(radio => {
+                                            radio.addEventListener('change', function() {
+                                                const condition = this.dataset.condition;
+                                                const newSafety = this.value;
+                                                const card = document.querySelector(`.condition-card[data-condition="${condition}"]`);
+                                                
+                                                if (card) {
+                                                    // Update card data attribute
+                                                    card.dataset.safety = newSafety;
+                                                    
+                                                    // Move card to appropriate section
+                                                    if (newSafety === 'safe') {
+                                                        safeContainer.appendChild(card);
+                                                    } else {
+                                                        unsafeContainer.appendChild(card);
+                                                    }
+                                                    
+                                                    // Update threshold bar color to match new safety classification
+                                                    const thresholdInput = card.querySelector('.threshold-input');
+                                                    if (thresholdInput) {
+                                                        updateThresholdBar(condition, parseInt(thresholdInput.value) || 0);
+                                                    }
+                                                    
+                                                    // Add subtle animation
+                                                    card.style.animation = 'none';
+                                                    setTimeout(() => {
+                                                        card.style.animation = 'slideIn 0.3s ease';
+                                                    }, 10);
+                                                }
+                                            });
+                                        });
+                                    });
+                                    
+                                    // Update threshold bar visualization
+                                    function updateThresholdBar(condition, value) {
+                                        const barBelow = document.getElementById(`bar_below_${condition}`);
+                                        const barAbove = document.getElementById(`bar_above_${condition}`);
+                                        const barMarker = document.getElementById(`bar_marker_${condition}`);
+                                        const barLabel = document.getElementById(`bar_label_${condition}`);
+                                        
+                                        if (!barBelow || !barAbove || !barMarker || !barLabel) return;
+                                        
+                                        // Clamp value between 0 and 100
+                                        value = Math.max(0, Math.min(100, value));
+                                        
+                                        // Update widths
+                                        barBelow.style.width = value + '%';
+                                        barAbove.style.width = (100 - value) + '%';
+                                        barMarker.style.left = value + '%';
+                                        
+                                        // Update marker label
+                                        const markerLabel = barMarker.querySelector('div');
+                                        if (markerLabel) {
+                                            markerLabel.textContent = value + '%';
+                                        }
+                                        
+                                        // Update trigger label
+                                        barLabel.textContent = `✓ Triggers >${value}%`;
+                                        
+                                        // Update bar color based on current safety classification
+                                        const card = document.querySelector(`.condition-card[data-condition="${condition}"]`);
+                                        if (card) {
+                                            const isSafe = card.dataset.safety === 'safe';
+                                            barAbove.style.background = isSafe ? 'rgba(52, 211, 153, 0.6)' : 'rgba(248, 113, 113, 0.6)';
+                                        }
+                                    }
+                                    </script>
+                                    <style>
+                                    @keyframes slideIn {
+                                        from {
+                                            opacity: 0;
+                                            transform: translateX(-10px);
+                                        }
+                                        to {
+                                            opacity: 1;
+                                            transform: translateX(0);
+                                        }
+                                    }
+                                    </style>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit">💾 Save Configuration</button>
+                            </form>
+                </div>
+            </div>
+        </div>
+    </body>

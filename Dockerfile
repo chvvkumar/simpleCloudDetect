@@ -42,7 +42,9 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code (this layer changes frequently, so it's last)
-COPY convert.py detect.py alpaca_safety_monitor.py start_services.sh ./
+COPY convert.py detect.py main.py start_services.sh ./
+COPY alpaca/ ./alpaca/
+COPY templates/ ./templates/
 
 # Fix line endings and make the startup script executable and set ownership
 RUN dos2unix start_services.sh && \
