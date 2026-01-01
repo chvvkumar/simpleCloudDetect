@@ -307,6 +307,10 @@ class AlpacaSafetyMonitor:
             key = (client_ip, client_id)
             self.connected_clients[key] = get_current_time(self.alpaca_config.timezone)
             
+            # Remove from disconnected clients if reconnecting
+            if key in self.disconnected_clients:
+                del self.disconnected_clients[key]
+            
             if len(self.connected_clients) == 1:
                 self.connected_at = self.connected_clients[key]
                 self.last_connected_at = self.connected_at
