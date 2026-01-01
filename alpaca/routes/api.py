@@ -223,36 +223,3 @@ def not_implemented(device_number: int):
         client_transaction_id=client_tx_id
     )), 400
 
-# Management endpoints
-@api_bp.route('/management/apiversions', methods=['GET'])
-def get_apiversions():
-    """Get supported API versions"""
-    return jsonify({"Value": [1], "ErrorNumber": 0, "ErrorMessage": ""})
-
-@api_bp.route('/management/v1/description', methods=['GET'])
-def get_management_description():
-    """Get server description"""
-    return jsonify({
-        "Value": {
-            "ServerName": "SimpleCloudDetect Alpaca Server",
-            "Manufacturer": "SimpleCloudDetect",
-            "ManufacturerVersion": "2.0",
-            "Location": monitor.alpaca_config.location
-        },
-        "ErrorNumber": 0,
-        "ErrorMessage": ""
-    })
-
-@api_bp.route('/management/v1/configureddevices', methods=['GET'])
-def get_configureddevices():
-    """Get list of configured devices"""
-    return jsonify({
-        "Value": [{
-            "DeviceName": monitor.alpaca_config.device_name,
-            "DeviceType": "SafetyMonitor",
-            "DeviceNumber": monitor.alpaca_config.device_number,
-            "UniqueID": f"simpleclouddetect-{monitor.alpaca_config.device_number}"
-        }],
-        "ErrorNumber": 0,
-        "ErrorMessage": ""
-    })

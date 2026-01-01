@@ -106,7 +106,7 @@ def setup_device(device_number: int):
         for (ip, client_id), conn_time in monitor.connected_clients.items():
             duration = (get_current_time(monitor.alpaca_config.timezone) - conn_time).total_seconds()
             client_list.append({
-                'ip': f"{ip} (ID: {client_id})",
+                'ip': ip,
                 'status': 'connected',
                 'duration': f"{int(duration)}s",
                 'duration_seconds': duration,
@@ -119,7 +119,7 @@ def setup_device(device_number: int):
         for (ip, client_id), (conn_time, disc_time) in monitor.disconnected_clients.items():
             duration = (disc_time - conn_time).total_seconds()
             client_list.append({
-                'ip': f"{ip} (ID: {client_id})",
+                'ip': ip,
                 'status': 'disconnected',
                 'duration': f"{int(duration)}s",
                 'duration_seconds': duration,
@@ -171,3 +171,42 @@ def setup_device(device_number: int):
         default_threshold=monitor.alpaca_config.default_threshold,
         class_thresholds=monitor.alpaca_config.class_thresholds
     )
+
+
+# ASCOM Alpaca Management API Endpoints (must be at root, not under /api prefix)
+@mgmt_bp.route('/management/apiversions', methods=['GET'])
+def get_apiversions():
+    """Get supported API versions"""
+    return {
+        "Value": [1], 
+        "ErrorNumber": 0, 
+        "ErrorMessage": ""
+    }
+
+@mgmt_bp.route('/management/v1/description', methods=['GET'])
+def get_management_description():
+    """Get server description"""
+    return {
+        "Value": {
+            "ServerName": "SimpleCloudDetect",
+            "Manufacturer": "SimpleCloudDetect",
+            "ManufacturerVersion": "2.0",
+            "Location": monitor.alpaca_config.location
+        },
+        "ErrorNumber": 0,
+        "ErrorMessage": ""
+    }
+
+@mgmt_bp.route('/management/v1/configureddevices', methods=['GET'])
+def get_configureddevices():
+    """Get list of configured devices"""
+    return {
+        "Value": [{
+            "DeviceName": monitor.alpaca_config.device_name,
+            "DeviceType": "SafetyMonitor",
+            "DeviceNumber": monitor.alpaca_config.device_number,
+            "UniqueID": f"simpleclouddetect-safetymonitor-{monitor.alpaca_config.device_number}"
+        }],
+        "ErrorNumber": 0,
+        "ErrorMessage": ""
+    }
