@@ -159,10 +159,10 @@ def setup_device(device_number: int):
                 'disconnected_ts': disc_ts
             })
     
-    # Safety history
+    # Safety history (newest first - reverse chronological)
     safety_history = []
     with monitor.detection_lock:
-        for entry in list(monitor._safety_history)[-10:]:  # Last 10 entries
+        for entry in reversed(list(monitor._safety_history)[-10:]):  # Last 10 entries, newest first
             try:
                 # Convert timestamp to current timezone
                 tz = ZoneInfo(monitor.alpaca_config.timezone)
