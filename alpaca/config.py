@@ -70,12 +70,24 @@ class AlpacaConfig:
         filepath = self.get_config_path()
         try:
             # Create directory if it doesn't exist (for /config volume usage)
-            os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+            dir_path = os.path.dirname(os.path.abspath(filepath))
+            os.makedirs(dir_path, exist_ok=True)
             
             config_dict = asdict(self)
             with open(filepath, 'w') as f:
                 json.dump(config_dict, f, indent=2)
             logger.info(f"Configuration saved to {filepath}")
+        except PermissionError:
+            # Enhanced error logging for permission issues
+            try:
+                dir_path = os.path.dirname(os.path.abspath(filepath))
+                stat_info = os.stat(dir_path)
+                logger.error(f"Permission denied saving to {filepath}. "
+                             f"Directory '{dir_path}' is owned by UID {stat_info.st_uid} with mode {oct(stat_info.st_mode)[-3:]}. "
+                             f"Container running as UID {os.getuid()}. "
+                             f"Fix with: sudo chown {os.getuid()} {dir_path}")
+            except Exception:
+                logger.error(f"Failed to save configuration to {filepath}: [Errno 13] Permission denied")
         except Exception as e:
             logger.error(f"Failed to save configuration to {filepath}: {e}")
     

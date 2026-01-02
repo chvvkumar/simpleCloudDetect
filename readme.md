@@ -47,6 +47,13 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 
 **Docker (Recommended):**
 
+1. Prepare the configuration directory:
+```shell
+mkdir -p /path/to/config
+sudo chown 1000:1000 /path/to/config
+```
+
+2. Run the container:
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
   -v /path/to/config:/config \
