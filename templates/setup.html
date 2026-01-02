@@ -808,8 +808,8 @@
                                             <table id="clientTable" style="width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px;">
                                                 <thead>
                                                     <tr style="background: rgba(15, 23, 42, 0.8); position: sticky; top: 0; z-index: 10;">
-                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">IP ↕</th>
-                                                        <th style="padding: 8px; text-align: center; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">Status ↕</th>
+                                                        <th style="padding: 8px; width: 50px; text-align: center; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">Status ↕</th>
+                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">IP ↕</th>
                                                         <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(2)">Duration ↕</th>
                                                         <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Connected ↕</th>
                                                         <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(4)">Disconnected ↕</th>
@@ -818,10 +818,10 @@
                                                 <tbody>
                                                     {% for client in client_list %}
                                                     <tr style="border-bottom: 1px solid rgba(71, 85, 105, 0.2); transition: background 0.2s;">
-                                                        <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
-                                                        <td style="padding: 8px; color: {{ 'rgb(52, 211, 153)' if client.status == 'connected' else 'rgb(148, 163, 184)' }}; text-align: center;" data-sort="{{ 1 if client.status == 'connected' else 0 }}">
-                                                            {{ '●' if client.status == 'connected' else '○' }}
+                                                        <td style="padding: 8px; width: 50px; color: {{ 'rgb(52, 211, 153)' if client.status == 'connected' else 'rgb(148, 163, 184)' }}; text-align: center;" data-sort="{{ 1 if client.status == 'connected' else 0 }}">
+                                                            {{ '■' if client.status == 'connected' else '□' }}
                                                         </td>
+                                                        <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
                                                         <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);" data-sort="{{ client.duration_seconds }}">{{ client.duration }}</td>
                                                         <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.connected_ts }}">{{ client.connected_time }}</td>
                                                         <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.disconnected_ts }}">{{ client.disconnected_time }}</td>
