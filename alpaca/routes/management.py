@@ -104,6 +104,9 @@ def setup_device(device_number: int):
     # Build client list
     client_list = []
     with monitor.connection_lock:
+        # Get set of currently connected IPs
+        connected_ips = {ip for (ip, client_id) in monitor.connected_clients.keys()}
+        
         for (ip, client_id), conn_time in monitor.connected_clients.items():
             duration = (get_current_time(monitor.alpaca_config.timezone) - conn_time).total_seconds()
             
@@ -129,7 +132,11 @@ def setup_device(device_number: int):
                 'disconnected_ts': 0
             })
         
+        # Only show disconnected clients if their IP is not currently connected
         for (ip, client_id), (conn_time, disc_time) in monitor.disconnected_clients.items():
+            if ip in connected_ips:
+                continue  # Skip disconnected entries for IPs that are currently connected
+                
             duration = (disc_time - conn_time).total_seconds()
             
             try:
