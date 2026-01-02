@@ -17,7 +17,8 @@ COPY requirements.txt requirements-arm64.txt ./
 # Install dependencies based on architecture
 ARG TARGETPLATFORM
 RUN pip install --no-cache-dir --upgrade pip && \
-    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; \
+    then \
         pip install --no-cache-dir -r requirements-arm64.txt; \
     else \
         pip install --no-cache-dir -r requirements.txt; \
@@ -38,18 +39,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1000 appuser
 
 # Copy Python packages and binaries from builder
+# NOTE: We generally do NOT need to chown site-packages; read-only access is sufficient for the app.
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy application code (this layer changes frequently, so it's last)
-COPY convert.py detect.py main.py start_services.sh ./
-COPY alpaca/ ./alpaca/
-COPY templates/ ./templates/
+# Copy application code with ownership set explicitly during copy
+# This avoids the expensive "chown -R" layer later
+COPY --chown=appuser:appuser convert.py detect.py main.py start_services.sh ./
+COPY --chown=appuser:appuser alpaca/ ./alpaca/
+COPY --chown=appuser:appuser templates/ ./templates/
 
-# Fix line endings and make the startup script executable and set ownership
+# Fix line endings and make the startup script executable
+# We only chown the specific script we modified if necessary, not the whole /app recursively
 RUN dos2unix start_services.sh && \
     chmod +x start_services.sh && \
-    chown -R appuser:appuser /app
+    chown appuser:appuser start_services.sh
 
 # Switch to non-root user
 USER appuser
