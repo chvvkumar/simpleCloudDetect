@@ -232,7 +232,12 @@ jobs:
         NEW_TAG="${{ needs.build.outputs.tag }}"
         
         # Get all matching tags, exclude the new tag if it exists, and get the latest
-        PREVIOUS_TAG=$(git tag -l "${TAG_PATTERN}" | grep -v "^${NEW_TAG}$" | sort -V | tail -n1)
+        # For main branch, also exclude dev tags (v-dev-*) to prevent incorrect comparisons
+        if [ "$BRANCH_NAME" = "main" ]; then
+          PREVIOUS_TAG=$(git tag -l "${TAG_PATTERN}" | grep -v "^${NEW_TAG}$" | grep -v "^v-.*-" | sort -V | tail -n1)
+        else
+          PREVIOUS_TAG=$(git tag -l "${TAG_PATTERN}" | grep -v "^${NEW_TAG}$" | sort -V | tail -n1)
+        fi
         
         if [ -z "$PREVIOUS_TAG" ]; then
           echo "No previous tag found, showing last 20 commits"
