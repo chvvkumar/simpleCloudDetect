@@ -49,6 +49,7 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/config:/config \
   -v /path/to/keras_model.h5:/app/keras_model.h5 \
   -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://your-allsky-camera/image.jpg" \
@@ -147,6 +148,16 @@ docker pull chvvkumar/simpleclouddetect:latest
 
 > **Note:** For detailed Alpaca configuration, see **[ALPACA_README.md](ALPACA_README.md)**
 
+### Persistent Configuration
+
+To ensure your settings (device name, thresholds, etc.) are saved across container restarts, mount the `/config` directory:
+
+```shell
+-v /path/to/config:/config
+```
+
+The application will save `alpaca_config.json` in this directory. If a config file exists, it will take precedence over environment variables for the settings it contains.
+
 ### Raspberry Pi Support
 
 **Multi-architecture support:** The Docker images are built for both AMD64 (x86_64) and ARM64 (Raspberry Pi 4/5). Docker will automatically pull the correct image for your platform.
@@ -162,6 +173,7 @@ For Raspberry Pi, use the same docker commands. The ARM64 build uses full Tensor
 **With URL-based image:**
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/config:/config \
   -v /path/to/keras_model.h5:/app/keras_model.h5 \
   -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
@@ -180,6 +192,7 @@ docker run -d --name simple-cloud-detect --network=host \
 **With local file:**
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/config:/config \
   -v $HOME/path/to/image.jpg:/tmp/image.jpg \
   -v /path/to/keras_model.h5:/app/keras_model.h5 \
   -v /path/to/labels.txt:/app/labels.txt \
@@ -196,6 +209,7 @@ docker run -d --name simple-cloud-detect --network=host \
 **With URL-based image:**
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/config:/config \
   -v /path/to/keras_model.h5:/app/keras_model.h5 \
   -v /path/to/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://allskypi5.lan/current/resized/image.jpg" \
@@ -214,6 +228,7 @@ To use your own trained model and labels:
 
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/config:/config \
   -v /path/to/your/keras_model.h5:/app/keras_model.h5 \
   -v /path/to/your/labels.txt:/app/labels.txt \
   -e IMAGE_URL="http://allskypi5.lan/image.jpg" \
@@ -250,6 +265,7 @@ services:
       - ALPACA_PORT=11111
       - ALPACA_UPDATE_INTERVAL=30
     volumes:
+      - /path/to/config:/config
       - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
       - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
@@ -273,6 +289,7 @@ services:
       - DETECT_INTERVAL=60
       - VERIFY_SSL=false
     volumes:
+      - /path/to/config:/config
       - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
       - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
@@ -292,7 +309,8 @@ services:
       - MQTT_DISCOVERY_MODE=homeassistant
       - DEVICE_ID=clouddetect_001
     volumes:
-      - '$HOME/path/to/image.jpg:/tmp/image.jpg'
+      - /path/to/config:/config
+      - /path/to/image.jpg:/tmp/image.jpg
       - /home/pi/git/simpleCloudDetect/keras_model.h5:/app/keras_model.h5
       - /home/pi/git/simpleCloudDetect/labels.txt:/app/labels.txt
 ```
@@ -401,6 +419,7 @@ While an example model is included, **training your own model with your camera's
 **For Docker:**
 ```shell
 docker run -d --name simple-cloud-detect --network=host \
+  -v /path/to/config:/config \
   -v /path/to/your/keras_model.h5:/app/keras_model.h5 \
   -v /path/to/your/labels.txt:/app/labels.txt \
   # ...other environment variables...

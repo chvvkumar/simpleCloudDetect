@@ -15,23 +15,26 @@ def create_app():
     app = Flask(__name__, template_folder='../templates')
     CORS(app)
     
-    # Load configs
-    alpaca_cfg = AlpacaConfig.load_from_file()
-    if alpaca_cfg is None:
-        # Create default config from environment
-        alpaca_cfg = AlpacaConfig(
-            port=int(os.getenv('ALPACA_PORT', '11111')),
-            device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
-            detection_interval=int(os.getenv('DETECT_INTERVAL', '30')),
-            update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
-        )
-        alpaca_cfg.save_to_file()
-    else:
-        # Override settings from environment if provided
-        alpaca_cfg.port = int(os.getenv('ALPACA_PORT', str(alpaca_cfg.port)))
-        alpaca_cfg.device_number = int(os.getenv('ALPACA_DEVICE_NUMBER', str(alpaca_cfg.device_number)))
-        alpaca_cfg.detection_interval = int(os.getenv('DETECT_INTERVAL', str(alpaca_cfg.detection_interval)))
-        alpaca_cfg.update_interval = int(os.getenv('ALPACA_UPDATE_INTERVAL', str(alpaca_cfg.update_interval)))
+    # 1. Initialize configuration from Environment Variables (Base Config)
+    # This establishes the defaults if no file exists.
+    alpaca_cfg = AlpacaConfig(
+        port=int(os.getenv('ALPACA_PORT', '11111')),
+        device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
+        detection_interval=int(os.getenv('DETECT_INTERVAL', '30')),
+        update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
+    )
+
+    # 2. Load from file and override environment settings if file exists
+    # This ensures user settings (in file) take precedence over preconfigured env vars,
+    # but Env vars are still preserved if the file doesn't specify them.
+    file_settings = AlpacaConfig.load_settings_from_file()
+    if file_settings:
+        # Update our base config with ONLY the values explicitly in the file
+        for key, value in file_settings.items():
+            setattr(alpaca_cfg, key, value)
+    
+    # 3. Save the final configuration to ensure the file exists and is current
+    alpaca_cfg.save_to_file()
     
     detect_cfg = DetectConfig.from_env()
     

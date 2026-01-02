@@ -55,8 +55,14 @@ RUN dos2unix start_services.sh && \
     chmod +x start_services.sh && \
     chown appuser:appuser start_services.sh
 
+# Create configuration directory
+RUN mkdir -p /config && chown appuser:appuser /config
+
 # Switch to non-root user
 USER appuser
+
+# Set configuration file path
+ENV CONFIG_FILE=/config/alpaca_config.json
 
 # FIX: Add healthcheck to ensure container restarts if Python process hangs
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \

@@ -60,40 +60,46 @@ class AlpacaConfig:
     ntp_server: str = field(default_factory=lambda: os.environ.get('NTP_SERVER', 'pool.ntp.org'))
     timezone: str = field(default_factory=lambda: os.environ.get('TZ', 'UTC'))
     
-    def save_to_file(self, filepath: str = "alpaca_config.json"):
+    @classmethod
+    def get_config_path(cls) -> str:
+        """Get configuration file path from environment or default"""
+        return os.environ.get('CONFIG_FILE', 'alpaca_config.json')
+
+    def save_to_file(self):
         """Save configuration to JSON file"""
+        filepath = self.get_config_path()
         try:
+            # Create directory if it doesn't exist (for /config volume usage)
+            os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+            
             config_dict = asdict(self)
             with open(filepath, 'w') as f:
                 json.dump(config_dict, f, indent=2)
             logger.info(f"Configuration saved to {filepath}")
         except Exception as e:
-            logger.error(f"Failed to save configuration: {e}")
+            logger.error(f"Failed to save configuration to {filepath}: {e}")
     
     @classmethod
-    def load_from_file(cls, filepath: str = "alpaca_config.json"):
-        """Load configuration from JSON file with backward compatibility"""
+    def load_settings_from_file(cls) -> dict:
+        """Load configuration dictionary from JSON file, filtering for valid fields"""
+        filepath = cls.get_config_path()
         try:
             if os.path.exists(filepath):
                 with open(filepath, 'r') as f:
                     config_dict = json.load(f)
                 
-                # Ensure new fields exist with defaults for backward compatibility
-                if 'default_threshold' not in config_dict:
-                    config_dict['default_threshold'] = 50.0
-                if 'class_thresholds' not in config_dict:
-                    config_dict['class_thresholds'] = {}
-                if 'debounce_to_safe_sec' not in config_dict:
-                    config_dict['debounce_to_safe_sec'] = 60
-                if 'debounce_to_unsafe_sec' not in config_dict:
-                    config_dict['debounce_to_unsafe_sec'] = 0
-                if 'detection_interval' not in config_dict:
-                    config_dict['detection_interval'] = 30
-                if 'image_url' not in config_dict:
-                    config_dict['image_url'] = os.environ.get('IMAGE_URL', '')
-                
-                logger.info(f"Configuration loaded from {filepath}")
-                return cls(**config_dict)
+                # Filter dictionary to only include valid fields for this dataclass
+                valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
+                return {k: v for k, v in config_dict.items() if k in valid_fields}
         except Exception as e:
-            logger.error(f"Failed to load configuration: {e}")
+            logger.error(f"Failed to load configuration from {filepath}: {e}")
+        return {}
+
+    @classmethod
+    def load_from_file(cls):
+        """Load configuration from JSON file with backward compatibility"""
+        settings = cls.load_settings_from_file()
+        if settings:
+            logger.info(f"Configuration loaded from {cls.get_config_path()}")
+            return cls(**settings)
         return None
