@@ -59,7 +59,8 @@ jobs:
           push: true
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          # OPTIMIZATION: Changed mode=max to mode=min to speed up export on self-hosted runners
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=min
           platforms: linux/amd64,linux/arm64
       
       - name: Move cache

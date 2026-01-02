@@ -2,11 +2,11 @@
 
 ## 1. Overview
 
-SimpleCloudDetect is a standalone application designed to determine local sky conditions for astronomical purposes. It uses a machine learning model to classify images from an all-sky camera and determines if the conditions are "safe" for operating an observatory.
+SimpleCloudDetect is a standalone application designed to determine local sky conditions. It uses a machine learning model to classify images from an all-sky camera and determines if the conditions are "safe" for operating an observatory.
 
-The system is exposed as an ASCOM Alpaca SafetyMonitor, which is a standard interface for observatory safety equipment. It provides a web-based user interface for configuration and status monitoring, and can publish its findings to an MQTT broker for integration with other systems like Home Assistant.
+The system is exposed as an ASCOM Alpaca SafetyMonitor. It provides a web-based user interface for configuration and status monitoring, and can publish its findings to an MQTT broker for integration with other systems like Home Assistant.
 
-The application is designed to be deployed as a Docker container and supports both `amd64` and `arm64` architectures, allowing it to run on standard servers or single-board computers like a Raspberry Pi.
+The application is designed to be deployed as a Docker container and supports both `amd64` and `arm64` architectures, allowing it to run on standard x86 servers or single-board computers like a Raspberry Pi.
 
 ```mermaid
 graph TD
@@ -29,15 +29,31 @@ graph TD
 
 ## 2. Core Components
 
-The architecture is composed of two primary Python scripts and a set of configuration and model files.
+The architecture follows a modular package design with clear separation of concerns.
 
 ```mermaid
 graph TD
-    subgraph "alpaca_safety_monitor.py"
+    subgraph "main.py"
         direction LR
-        A(Application Server)
-        A -- Uses --> B
-        A -- Manages --> C(alpaca_config.json)
+        M(Application Entry Point)
+    end
+
+    subgraph "alpaca/ Package"
+        direction TB
+        M --> APP(__init__.py - App Factory)
+        APP --> CFG(config.py)
+        APP --> DEV(device.py)
+        APP --> DISC(discovery.py)
+        APP --> ROUTES(routes/)
+        
+        subgraph "routes/"
+            API(api.py - ASCOM Blueprint)
+            MGMT(management.py - Setup Blueprint)
+        end
+        
+        DEV --> CFG
+        API --> DEV
+        MGMT --> DEV
     end
 
     subgraph "detect.py"
@@ -46,8 +62,17 @@ graph TD
         B -- Loads --> D(keras_model.h5)
         B -- Loads --> E(labels.txt)
     end
+    
+    subgraph "templates/"
+        HTML(setup.html - Jinja2 Template)
+    end
 
-    style A fill:#264653,color:#fff
+    DEV -- Uses --> B
+    MGMT -- Renders --> HTML
+    DEV -- Manages --> C(alpaca_config.json)
+
+    style M fill:#264653,color:#fff
+    style APP fill:#2a9d8f,color:#fff
     style B fill:#2a9d8f,color:#fff
 ```
 
@@ -62,22 +87,71 @@ This script is the core of the cloud detection functionality.
   - **Prediction**: Performs inference using the loaded model to classify the image into one of six categories: `Clear`, `Mostly Cloudy`, `Overcast`, `Rain`, `Snow`, or `Wisps of clouds`.
   - **MQTT Publishing**: Publishes the raw detection result (class name, confidence score, and detection time) to a configured MQTT broker. It supports a legacy mode (single JSON topic) and a Home Assistant discovery mode, which automatically creates and updates sensors in Home Assistant.
 
-### 2.2. `alpaca_safety_monitor.py`: The Application Server
+### 2.2. `alpaca/` Package: Modular Application Components
 
-This script wraps the core inference engine into a full-featured application, acting as the main entry point.
+The application is organized as a Python package with clear separation of concerns:
+
+#### 2.2.1. `alpaca/config.py`: Configuration Management
+- **AlpacaConfig dataclass**: Centralized configuration with validation and persistence
+- **get_current_time()**: Timezone-aware timestamp generation
+- **Constants**: ASCOM error codes and cloud condition classifications
+- **save()/load()**: JSON-based configuration persistence
+
+#### 2.2.2. `alpaca/device.py`: SafetyMonitor Device Logic
+- **AlpacaSafetyMonitor class**: Core device implementation
+- **Key Optimization**: Image handling using raw bytes instead of base64 encoding
+  - `latest_image_bytes: Optional[bytes]` - Memory-efficient storage
+  - `_create_thumbnail_bytes()` - Returns raw JPEG bytes directly
+  - Eliminates encoding/decoding overhead in image serving
+- **Background Processing**: Continuous detection thread using `CloudDetector` from `detect.py`
+- **Safety Logic**: Configurable rules for unsafe conditions, confidence thresholds, and debouncing
+- **State Management**: Debounced transitions with configurable wait times
+
+#### 2.2.3. `alpaca/discovery.py`: ASCOM Discovery Protocol
+- **AlpacaDiscovery class**: UDP-based device discovery on port 32227
+- **RFC 8a11 Compliance**: Implements ASCOM Alpaca discovery specification
+- **JSON Response**: Returns device metadata for automatic client configuration
+
+#### 2.2.4. `alpaca/routes/api.py`: ASCOM API Blueprint
+- **Flask Blueprint**: All ASCOM SafetyMonitor REST API endpoints
+- **Primary Endpoint**: `GET /api/v1/safetymonitor/{device_number}/issafe`
+- **Optimized Image Serving**: `GET /api/v1/latest_image` serves raw JPEG bytes
+- **Standard Compliance**: Full ASCOM Alpaca SafetyMonitor interface
+- **Error Handling**: Validates device numbers and request parameters
+
+#### 2.2.5. `alpaca/routes/management.py`: Web UI Blueprint
+- **Setup Interface**: `GET/POST /setup/v1/safetymonitor/{device_number}/setup`
+- **Template Rendering**: Uses Jinja2 for clean separation of presentation
+- **Configuration**: Handles form submissions for all operational parameters
+- **Status Dashboard**: Real-time safety status, latest image, and detection history
+
+#### 2.2.6. `alpaca/__init__.py`: Application Factory
+- **create_app()**: Flask application factory pattern
+- **Blueprint Registration**: Mounts API and management routes
+- **Initialization**: Creates SafetyMonitor instance and configures Flask
+- **Returns**: Tuple of (app, safety_monitor) for external access
+
+### 2.3. `main.py`: Application Entry Point
+
+This is the new entry point that replaces the monolithic `alpaca_safety_monitor.py`:
 
 - **Responsibilities**:
-  - **ASCOM Alpaca Server**: Implements a standard ASCOM Alpaca SafetyMonitor device using the `Flask` web framework. This exposes a REST API that allows observatory control software to query the safety status. The primary endpoint is `GET /api/v1/safetymonitor/{device_number}/issafe`.
-  - **Web User Interface**: Provides a comprehensive web UI accessible at `/setup/v1/safetymonitor/{device_number}/setup`. This "Command Center" allows users to:
-    - View the current safety status, latest detection image, and confidence score.
-    - Configure all operational parameters.
-    - View a history of safety state transitions.
-  - **Background Processing**: It instantiates the `CloudDetector` from `detect.py` and runs the detection process in a continuous background thread.
-  - **Safety Logic**: It applies a layer of business logic on top of the raw model prediction to determine the final `is_safe` state. This logic is user-configurable and includes:
-    - **Unsafe Conditions**: A list of weather classifications that are considered unsafe (e.g., `Rain`, `Overcast`).
-    - **Confidence Thresholds**: A minimum confidence percentage the model must have for a classification to be considered valid. This can be set per-class.
-    - **Debouncing**: Configurable wait times before changing state. For example, it can be set to wait 5 minutes after conditions become clear before reporting "Safe", preventing rapid cycling during intermittent cloud cover.
-  - **Configuration Management**: Manages its own configuration via an `alpaca_config.json` file.
+  - **Application Initialization**: Calls `create_app()` factory to build Flask app
+  - **Thread Management**: Starts background detection thread and UDP discovery service
+  - **Signal Handling**: Graceful shutdown on SIGTERM/SIGINT
+  - **Production Server**: Runs Waitress WSGI server (32 threads, port 11111)
+  - **Clean Architecture**: Coordinates components without implementing business logic
+
+### 2.4. `templates/setup.html`: Web UI Template
+
+- **Jinja2 Template**: Dynamic content using template variables
+- **Features**:
+  - Real-time safety status display
+  - Latest image preview with timestamp
+  - Collapsible configuration sections
+  - Timing visualization for debounce settings
+  - Safety classification with confidence thresholds
+  - Client connection history
 
 ## 3. Deployment and Execution
 
@@ -98,12 +172,12 @@ The `Dockerfile` defines the container image.
 This shell script is executed when the container starts.
 
 1.  It first runs `convert.py`, which ensures the ML model is in the correct format.
-2.  It then uses `exec` to launch the `alpaca_safety_monitor.py` script. Using `exec` makes the Python application the main process in the container, which allows it to handle system signals correctly for graceful shutdown.
+2.  It then uses `exec` to launch `main.py` (the new modular entry point). Using `exec` makes the Python application the main process in the container, which allows it to handle system signals correctly for graceful shutdown.
 
 ```mermaid
 graph TD
     A(Start Container) --> B{Run convert.py};
-    B --> C{exec python3 alpaca_safety_monitor.py};
+    B --> C{exec python3 main.py};
     C --> D(Application Running...);
 ```
 
@@ -113,28 +187,58 @@ The typical data flow for a single detection cycle is as follows:
 
 ```mermaid
 sequenceDiagram
-    participant M as alpaca_safety_monitor.py
+    participant M as main.py
+    participant SM as AlpacaSafetyMonitor (device.py)
     participant D as detect.py (CloudDetector)
     participant K as Keras Model
     participant C as Clients (ASCOM, Web UI, MQTT)
 
+    M->>SM: Start detection thread
+    
     loop Detection Cycle
-        M->>D: detect()
+        SM->>D: detect()
         D->>+K: predict(image)
         K-->>-D: prediction
-        D-->>M: {class, confidence}
+        D-->>SM: {class, confidence}
+        SM->>SM: Apply safety & debounce logic
+        SM->>SM: Store image as bytes (optimized)
     end
 
-    M->>M: Apply safety & debounce logic
-    M-->>C: Serve is_safe status
+    C->>SM: Request status (HTTP/ASCOM)
+    SM-->>C: Serve is_safe status
+    
+    C->>SM: Request latest image
+    SM-->>C: Serve raw JPEG bytes (no encoding)
 ```
 
-1.  The background detection loop in `alpaca_safety_monitor.py` is triggered by its timer.
-2.  It calls the `detect()` method on the `CloudDetector` instance.
-3.  `CloudDetector` fetches the image from the `IMAGE_URL`.
-4.  The image is pre-processed and passed to the Keras model for inference.
-5.  The model returns a prediction (e.g., `class_name: "Clear"`, `confidence_score: 98.5`).
-6.  This result is passed back to `alpaca_safety_monitor.py`.
-7.  The safety logic engine evaluates this result against the user-defined rules (unsafe conditions, confidence thresholds, and debouncing timers).
-8.  The final, stable `is_safe` state (either `true` or `false`) is cached.
-9.  This state is then available to be served to clients via the ASCOM API, the web UI, and is also published to MQTT.
+1.  `main.py` initializes the Flask app via `create_app()` factory and starts the detection thread.
+2.  The background detection loop in `AlpacaSafetyMonitor` is triggered by its timer.
+3.  It calls the `detect()` method on the `CloudDetector` instance.
+4.  `CloudDetector` fetches the image from the `IMAGE_URL`.
+5.  The image is pre-processed and passed to the Keras model for inference.
+6.  The model returns a prediction (e.g., `class_name: "Clear"`, `confidence_score: 98.5`).
+7.  This result is passed back to `AlpacaSafetyMonitor`.
+8.  The safety logic engine evaluates this result against the user-defined rules (unsafe conditions, confidence thresholds, and debouncing timers).
+9.  The image is converted to raw JPEG bytes and stored (memory-optimized).
+10. The final, stable `is_safe` state (either `true` or `false`) is cached.
+11. This state is then available to be served to clients via the ASCOM API (through `api.py` blueprint), the web UI (through `management.py` blueprint), and is also published to MQTT.
+
+## 5. Architectural Improvements
+
+### 5.1. Modularity
+- **Separation of Concerns**: Configuration, device logic, routes, and discovery are isolated modules
+- **Flask Blueprints**: API and management routes are independent, testable components
+- **Application Factory**: Enables multiple app instances, testing, and configuration flexibility
+
+### 5.2. Performance Optimization
+- **Raw Bytes Storage**: Images stored as `bytes` instead of base64-encoded strings
+  - Eliminates base64 encoding/decoding overhead
+  - Reduces memory footprint by ~33%
+  - Direct serving via `Response(img_bytes, mimetype='image/jpeg')`
+- **Efficient Thumbnail Generation**: PIL image immediately converted to bytes and deleted
+
+### 5.3. Maintainability
+- **Template Extraction**: 1,559 lines of HTML moved from Python to proper Jinja2 template
+- **Clear Entry Point**: `main.py` coordinates components without business logic
+- **Type Safety**: Dataclass-based configuration with validation
+- **Testability**: Modular structure enables unit testing of individual components
