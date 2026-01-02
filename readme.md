@@ -156,7 +156,25 @@ To ensure your settings (device name, thresholds, etc.) are saved across contain
 -v /path/to/config:/config
 ```
 
-The application will save `alpaca_config.json` in this directory. If a config file exists, it will take precedence over environment variables for the settings it contains.
+The application will save `alpaca_config.json` in this directory. If a config file exists, it will take precedence for environment variables for the settings it contains.
+
+**Setting Proper Permissions:**
+
+The config directory must be writable by the container user. To ensure proper permissions:
+
+```shell
+# Create the config directory
+mkdir -p /path/to/config
+
+# Set appropriate permissions (Linux/macOS)
+chmod 777 /path/to/config
+
+# Or set ownership to a specific user (uses current user's UID, recommended for better security)
+sudo chown $(id -u):$(id -g) /path/to/config
+chmod 755 /path/to/config
+```
+
+> **Note:** The container runs as user ID 1000 by default. If you encounter permission errors like `[Errno 13] Permission denied: '/config/alpaca_config.json'`, verify that the config directory is writable by the container user.
 
 ### Raspberry Pi Support
 
