@@ -224,6 +224,35 @@
                 font-family: 'JetBrains Mono', monospace;
             }
             
+            .info-tooltip {
+                position: relative;
+                display: inline-block;
+                cursor: help;
+                color: rgb(148, 163, 184);
+                margin-left: 6px;
+                font-size: 12px;
+            }
+            
+            .info-tooltip:hover::after {
+                content: attr(data-tooltip);
+                position: absolute;
+                left: 100%;
+                top: 50%;
+                transform: translateY(-50%);
+                margin-left: 10px;
+                padding: 8px 12px;
+                background-color: rgb(30, 41, 59);
+                color: rgb(226, 232, 240);
+                border-radius: 6px;
+                white-space: nowrap;
+                font-size: 11px;
+                font-weight: normal;
+                text-transform: none;
+                z-index: 1000;
+                border: 1px solid rgb(51, 65, 85);
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            }
+            
             .collapsible-btn {
                 width: 100%;
                 background: rgba(15, 23, 42, 0.6);
@@ -741,7 +770,10 @@
                                         <div class="detection-value">{{ current_confidence }}%</div>
                                     </div>
                                     <div class="detection-item">
-                                        <div class="detection-label">ASCOM Status</div>
+                                        <div class="detection-label">
+                                            ASCOM Status
+                                            <span class="info-tooltip" data-tooltip="Reports UNSAFE when no clients are connected. Cloud detection is always active in 'Safety History' panel.">ⓘ</span>
+                                        </div>
                                         <div class="detection-value" style="color: {{ ascom_safe_color }};">{{ ascom_safe_status }}</div>
                                     </div>
                                     <div class="detection-item">
