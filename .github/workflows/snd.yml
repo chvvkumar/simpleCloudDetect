@@ -102,3 +102,5 @@ jobs:
           docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd
           IMAGE_SIZE=$(docker images --format "{{.Size}}" ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd | head -n1)
           echo "Docker image size: $IMAGE_SIZE"
+
+          
