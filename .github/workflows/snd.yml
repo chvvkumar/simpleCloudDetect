@@ -16,10 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: git01
+          - runner: [self-hosted, Linux, X64]
             platform: linux/amd64
             platform_tag: amd64
-          - runner: gitpi01
+          - runner: [self-hosted, Linux, ARM64]
             platform: linux/arm64
             platform_tag: arm64
     steps:
@@ -44,7 +44,7 @@ jobs:
 
       - name: Cache Docker layers
         # Skip GitHub Actions cache for self-hosted runners (files persist locally)
-        if: ${{ runner.name != 'git01' && runner.name != 'gitpi01' }}
+        if: ${{ !contains(runner.labels, 'self-hosted') }}
         uses: actions/cache@v4
         with:
           # CHANGE: Use a path in the home directory, not /tmp
