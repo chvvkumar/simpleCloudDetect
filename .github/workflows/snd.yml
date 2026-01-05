@@ -37,9 +37,14 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
+      - name: Set cache paths
+        run: |
+          echo "CACHE_PATH=${HOME}/.cache/buildx" >> $GITHUB_ENV
+          echo "CACHE_PATH_NEW=${HOME}/.cache/buildx-new" >> $GITHUB_ENV
+
       - name: Cache Docker layers
         # Skip GitHub Actions cache for self-hosted runners (files persist locally)
-        if: ${{ runner.name != 'git01' }}
+        if: ${{ runner.name != 'git01' && runner.name != 'gitpi01' }}
         uses: actions/cache@v4
         with:
           # CHANGE: Use a path in the home directory, not /tmp
@@ -57,16 +62,15 @@ jobs:
           # Push to a temporary tag specific to the architecture (e.g., :snd-arm64)
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd-${{ matrix.platform_tag }}
           # Use persistent cache on self-hosted runner
-          cache-from: type=local,src=/home/runner/.cache/buildx
-          cache-to: type=local,dest=/home/runner/.cache/buildx-new,mode=min
+          cache-from: type=local,src=${{ env.CACHE_PATH }}
+          cache-to: type=local,dest=${{ env.CACHE_PATH_NEW }},mode=min
           platforms: ${{ matrix.platform }}
       
       - name: Move cache
         if: always()
         run: |
-          # CHANGE: Update paths here too
-          rm -rf ~/.cache/buildx
-          mv ~/.cache/buildx-new ~/.cache/buildx
+          rm -rf ${{ env.CACHE_PATH }}
+          mv ${{ env.CACHE_PATH_NEW }} ${{ env.CACHE_PATH }}
 
   merge:
     name: Merge Multi-Arch Image
