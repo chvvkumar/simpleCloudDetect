@@ -31,9 +31,9 @@ class Config:
     image_url: str
     model_path: str
     label_path: str
-    broker: str
+    broker: Optional[str]
     port: int
-    topic: str
+    topic: Optional[str]
     detect_interval: int
     mqtt_username: Optional[str]
     mqtt_password: Optional[str]
@@ -50,15 +50,19 @@ class Config:
         discovery_mode = os.getenv('MQTT_DISCOVERY_MODE', 'legacy').lower()
         
         # Base required vars for all modes
-        required_vars = ['IMAGE_URL', 'MQTT_BROKER', 'DETECT_INTERVAL']
+        required_vars = ['IMAGE_URL', 'DETECT_INTERVAL']
         
-        # Legacy mode requires MQTT_TOPIC
-        if discovery_mode == 'legacy':
-            required_vars.append('MQTT_TOPIC')
-        # HA discovery mode requires DEVICE_ID
-        elif discovery_mode == 'homeassistant':
-            if not os.getenv('DEVICE_ID'):
-                raise ValueError("DEVICE_ID is required when MQTT_DISCOVERY_MODE is 'homeassistant'")
+        broker = os.getenv('MQTT_BROKER')
+        
+        # Validate MQTT settings only if broker is configured
+        if broker:
+            # Legacy mode requires MQTT_TOPIC
+            if discovery_mode == 'legacy' and not os.getenv('MQTT_TOPIC'):
+                required_vars.append('MQTT_TOPIC')
+            # HA discovery mode requires DEVICE_ID
+            elif discovery_mode == 'homeassistant':
+                if not os.getenv('DEVICE_ID'):
+                    raise ValueError("DEVICE_ID is required when MQTT_DISCOVERY_MODE is 'homeassistant'")
         
         missing = [var for var in required_vars if not os.getenv(var)]
         if missing:
@@ -68,17 +72,17 @@ class Config:
             image_url=os.environ['IMAGE_URL'],
             model_path=os.getenv('MODEL_PATH', 'keras_model.h5'),
             label_path=os.getenv('LABEL_PATH', 'labels.txt'),
-            broker=os.environ['MQTT_BROKER'],
-            port=int(os.getenv('MQTT_PORT', '1883')),
-            topic=os.getenv('MQTT_TOPIC', ''),
+            broker=broker or None,
+            port=int(os.getenv('MQTT_PORT') or '1883'),
+            topic=os.getenv('MQTT_TOPIC') or None,
             detect_interval=int(os.environ['DETECT_INTERVAL']),
-            mqtt_username=os.getenv('MQTT_USERNAME'),
-            mqtt_password=os.getenv('MQTT_PASSWORD'),
+            mqtt_username=os.getenv('MQTT_USERNAME') or None,
+            mqtt_password=os.getenv('MQTT_PASSWORD') or None,
             verify_ssl=os.getenv('VERIFY_SSL', 'false').lower() == 'true',
             mqtt_discovery_mode=discovery_mode,
             mqtt_discovery_prefix=os.getenv('MQTT_DISCOVERY_PREFIX', 'homeassistant'),
             device_name=os.getenv('DEVICE_NAME', 'Cloud Detector'),
-            device_id=os.getenv('DEVICE_ID')
+            device_id=os.getenv('DEVICE_ID') or None
         )
 
 class HADiscoveryManager:
@@ -190,7 +194,7 @@ class CloudDetector:
         self.ha_discovery = None
         
         # Initialize HA discovery if enabled
-        if self.config.mqtt_discovery_mode == 'homeassistant':
+        if self.mqtt_client and self.config.mqtt_discovery_mode == 'homeassistant':
             self.ha_discovery = HADiscoveryManager(self.config, self.mqtt_client)
             self.ha_discovery.publish_discovery_configs()
         
@@ -332,6 +336,9 @@ class CloudDetector:
 
     def publish_result(self, result: dict):
         """Publish detection result to MQTT"""
+        if not self.mqtt_client:
+            return
+
         try:
             if self.config.mqtt_discovery_mode == 'homeassistant':
                 # Use HA discovery publishing
