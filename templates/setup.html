@@ -843,8 +843,8 @@
                                                         <th style="padding: 8px; width: 50px; text-align: center; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(0)">Status ↕</th>
                                                         <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(1)">IP ↕</th>
                                                         <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(2)">Duration ↕</th>
-                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Connected ↕</th>
-                                                        <th style="padding: 8px; text-align: left; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(4)">Disconnected ↕</th>
+                                                        <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(3)">Connected ↕</th>
+                                                        <th style="padding: 8px; text-align: right; color: rgb(148, 163, 184); cursor: pointer;" onclick="sortClientTable(4)">Disconnected ↕</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -855,8 +855,8 @@
                                                         </td>
                                                         <td style="padding: 8px; color: rgb(226, 232, 240);">{{ client.ip }}</td>
                                                         <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);" data-sort="{{ client.duration_seconds }}">{{ client.duration }}</td>
-                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.connected_ts }}">{{ client.connected_time }}</td>
-                                                        <td style="padding: 8px; color: rgb(148, 163, 184);" data-sort="{{ client.disconnected_ts }}">{{ client.disconnected_time }}</td>
+                                                        <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);" data-sort="{{ client.connected_ts }}">{{ client.connected_time }}</td>
+                                                        <td style="padding: 8px; text-align: right; color: rgb(148, 163, 184);" data-sort="{{ client.disconnected_ts }}">{{ client.disconnected_time }}</td>
                                                     </tr>
                                                     {% endfor %}
                                                 </tbody>
