@@ -24,8 +24,9 @@ on:
       - 'ALPACA_README.md'
 
 jobs:
-  build:
-    runs-on: self-hosted
+  prepare:
+    name: Prepare Build Metadata
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     outputs:
       should_release: ${{ steps.check_release.outputs.should_release }}
@@ -39,30 +40,6 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Cache pip packages
-        # Skip cache for self-hosted runners (files persist locally)
-        if: ${{ runner.name != 'git01' }}
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            /root/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      
       - name: Determine Docker tags and cache
         id: docker_tags
         run: |
@@ -70,24 +47,9 @@ jobs:
           
           if [ "$BRANCH_NAME" = "main" ]; then
             echo "tag=latest" >> $GITHUB_OUTPUT
-            echo "cache_key=${{ runner.os }}-buildx-main-${{ github.sha }}" >> $GITHUB_OUTPUT
-            echo "cache_restore=${{ runner.os }}-buildx-main-" >> $GITHUB_OUTPUT
           else
             echo "tag=dev" >> $GITHUB_OUTPUT
-            echo "cache_key=${{ runner.os }}-buildx-dev-${{ github.sha }}" >> $GITHUB_OUTPUT
-            echo "cache_restore=${{ runner.os }}-buildx-dev-" >> $GITHUB_OUTPUT
           fi
-      
-      - name: Cache Docker layers
-        # Skip GitHub Actions cache for self-hosted runners (files persist locally)
-        if: ${{ runner.name != 'git01' }}
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ steps.docker_tags.outputs.cache_key }}
-          restore-keys: |
-            ${{ steps.docker_tags.outputs.cache_restore }}
-            ${{ runner.os }}-buildx-
       
       - name: Determine if release should be created
         id: check_release
@@ -167,23 +129,106 @@ jobs:
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
           echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build ${{ matrix.platform_tag }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: git01
+            platform: linux/amd64
+            platform_tag: amd64
+          - runner: gitpi01
+            platform: linux/arm64
+            platform_tag: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Set cache paths
+        run: |
+          echo "CACHE_PATH=${HOME}/.cache/buildx" >> $GITHUB_ENV
+          echo "CACHE_PATH_NEW=${HOME}/.cache/buildx-new" >> $GITHUB_ENV
+
+      - name: Cache Docker layers
+        # Skip GitHub Actions cache for self-hosted runners (files persist locally)
+        if: ${{ runner.name != 'git01' && runner.name != 'gitpi01' }}
+        uses: actions/cache@v4
+        with:
+          # CHANGE: Use a path in the home directory, not /tmp
+          path: ~/.cache/buildx
+          key: ${{ runner.os }}-buildx-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ github.ref_name }}-
+            ${{ runner.os }}-buildx-
       
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ steps.docker_tags.outputs.tag }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          # CHANGED: mode=min speeds up export by only caching final layers, avoiding massive I/O
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=min
-          platforms: linux/amd64,linux/arm64
+          # Push to a temporary tag specific to the architecture
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }}-${{ matrix.platform_tag }}
+          # Use persistent cache on self-hosted runner
+          cache-from: type=local,src=${{ env.CACHE_PATH }}
+          cache-to: type=local,dest=${{ env.CACHE_PATH_NEW }},mode=min
+          platforms: ${{ matrix.platform }}
       
       - name: Move cache
         if: always()
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          rm -rf ${{ env.CACHE_PATH }}
+          mv ${{ env.CACHE_PATH_NEW }} ${{ env.CACHE_PATH }}
+
+  merge:
+    name: Merge Multi-Arch Image
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Create and push manifest list
+        # Combines the amd64 and arm64 tags into the single tag (latest or dev)
+        run: |
+          docker buildx imagetools create -t ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }} \
+            ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }}-amd64 \
+            ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }}-arm64
+      
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }}
+
+      - name: Get image size
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }}
+          IMAGE_SIZE=$(docker images --format "{{.Size}}" ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }} | head -n1)
+          echo "Docker image size: $IMAGE_SIZE"
+      
+      - name: Checkout repository
+        if: github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
       
       - name: Docker Hub Description
         if: github.ref == 'refs/heads/main'
@@ -194,17 +239,10 @@ jobs:
           repository: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect
           short-description: "ML-based cloud detection for AllSky cameras with MQTT and ASCOM Alpaca"
           readme-filepath: ./readme.md
-      
-      - name: Get image size
-        if: github.ref == 'refs/heads/dev'
-        run: |
-          docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ steps.docker_tags.outputs.tag }}
-          IMAGE_SIZE=$(docker images --format "{{.Size}}" ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ steps.docker_tags.outputs.tag }} | head -n1)
-          echo "Docker image size: $IMAGE_SIZE"
 
   release:
-    needs: build
-    if: needs.build.outputs.should_release == 'true'
+    needs: [prepare, merge]
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -219,7 +257,7 @@ jobs:
       id: changelog
       run: |
         # Get the previous tag for this branch (excluding the tag we're about to create)
-        BRANCH_NAME="${{ needs.build.outputs.branch }}"
+        BRANCH_NAME="${{ needs.prepare.outputs.branch }}"
         
         if [ "$BRANCH_NAME" = "main" ]; then
           TAG_PREFIX="v"
@@ -229,7 +267,7 @@ jobs:
           TAG_PATTERN="${TAG_PREFIX}*"
         fi
         
-        NEW_TAG="${{ needs.build.outputs.tag }}"
+        NEW_TAG="${{ needs.prepare.outputs.tag }}"
         
         # Get all matching tags, exclude the new tag if it exists, and get the latest
         # For main branch, also exclude dev tags (v-dev-*) to prevent incorrect comparisons
@@ -264,32 +302,32 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
         # Check if tag exists (should not happen due to version increment logic)
-        if git rev-parse "${{ needs.build.outputs.tag }}" >/dev/null 2>&1; then
-          echo "❌ Error: Tag ${{ needs.build.outputs.tag }} already exists"
+        if git rev-parse "${{ needs.prepare.outputs.tag }}" >/dev/null 2>&1; then
+          echo "❌ Error: Tag ${{ needs.prepare.outputs.tag }} already exists"
           echo "This should not happen - version increment logic failed"
           exit 1
         else
-          git tag ${{ needs.build.outputs.tag }}
-          git push origin ${{ needs.build.outputs.tag }}
-          echo "✅ Created and pushed tag ${{ needs.build.outputs.tag }}"
+          git tag ${{ needs.prepare.outputs.tag }}
+          git push origin ${{ needs.prepare.outputs.tag }}
+          echo "✅ Created and pushed tag ${{ needs.prepare.outputs.tag }}"
         fi
     
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ needs.build.outputs.tag }}
-        name: ${{ needs.build.outputs.release_type == 'test' && format('🧪 Test Release {0} ({1} branch)', needs.build.outputs.tag, needs.build.outputs.branch) || format('Release {0}', needs.build.outputs.tag) }}
-        prerelease: ${{ needs.build.outputs.release_type == 'test' }}
+        tag_name: ${{ needs.prepare.outputs.tag }}
+        name: ${{ needs.prepare.outputs.release_type == 'test' && format('🧪 Test Release {0} ({1} branch)', needs.prepare.outputs.tag, needs.prepare.outputs.branch) || format('Release {0}', needs.prepare.outputs.tag) }}
+        prerelease: ${{ needs.prepare.outputs.release_type == 'test' }}
         files: |
           README.md
           ALPACA_README.md
         body: |
-          ${{ needs.build.outputs.release_type == 'test' && '## 🧪 Test Release' || '## 📦 SimpleCloudDetect' }}
-          ${{ needs.build.outputs.tag }}
+          ${{ needs.prepare.outputs.release_type == 'test' && '## 🧪 Test Release' || '## 📦 SimpleCloudDetect' }}
+          ${{ needs.prepare.outputs.tag }}
           
-          ${{ needs.build.outputs.release_type == 'test' && format('⚠️ **This is a pre-release test build from the `{0}` branch.**', needs.build.outputs.branch) || '' }}
-          ${{ needs.build.outputs.release_type == 'test' && '**Use for testing purposes only. For stable releases, use builds from the main branch.**' || '' }}
-          ${{ needs.build.outputs.release_type == 'test' && '' || 'ML-based cloud detection for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor support.' }}
+          ${{ needs.prepare.outputs.release_type == 'test' && format('⚠️ **This is a pre-release test build from the `{0}` branch.**', needs.prepare.outputs.branch) || '' }}
+          ${{ needs.prepare.outputs.release_type == 'test' && '**Use for testing purposes only. For stable releases, use builds from the main branch.**' || '' }}
+          ${{ needs.prepare.outputs.release_type == 'test' && '' || 'ML-based cloud detection for AllSky cameras with MQTT and ASCOM Alpaca SafetyMonitor support.' }}
           
           ### Documentation
           - [README.md](README.md) - Complete setup and features
