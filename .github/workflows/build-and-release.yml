@@ -197,7 +197,7 @@ jobs:
   merge:
     name: Merge Multi-Arch Image
     needs: [prepare, build]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
