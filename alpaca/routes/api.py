@@ -28,6 +28,16 @@ def validate_device_number(device_number: int):
             error_message=f"Invalid device number: {device_number}",
             client_transaction_id=client_tx_id
         )), 400
+    
+    # Register heartbeat for watchdog (every API request keeps session alive)
+    try:
+        client_id, _ = monitor.get_client_params()
+        client_ip = request.remote_addr
+        monitor.register_heartbeat(client_ip, client_id)
+    except Exception as e:
+        # Don't fail the request if heartbeat fails
+        logger.debug(f"Heartbeat registration failed: {e}")
+    
     return None
 
 def create_simple_get_endpoint(attribute_getter):
@@ -222,4 +232,3 @@ def not_implemented(device_number: int):
         error_message="Command not implemented",
         client_transaction_id=client_tx_id
     )), 400
-
