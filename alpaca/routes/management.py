@@ -112,21 +112,29 @@ def setup_device(device_number: int):
             if ip not in unique_clients or conn_time > unique_clients[ip]['conn_time']:
                 duration = (get_current_time(monitor.alpaca_config.timezone) - conn_time).total_seconds()
                 
+                # Format duration as dd-hh-mm-ss fixed width
+                dur_int = int(duration)
+                days = dur_int // 86400
+                hours = (dur_int % 86400) // 3600
+                minutes = (dur_int % 3600) // 60
+                seconds = dur_int % 60
+                duration_str = f"{days:02d}d {hours:02d}h {minutes:02d}m {seconds:02d}s"
+
                 try:
                     # Convert timestamp to current timezone
                     tz = ZoneInfo(monitor.alpaca_config.timezone)
                     local_conn_time = conn_time.astimezone(tz)
-                    conn_time_str = local_conn_time.strftime("%H:%M:%S")
+                    conn_time_str = local_conn_time.strftime("%Y-%m-%d %H:%M:%S")
                     conn_ts = local_conn_time.timestamp()
                 except Exception:
                     # Fallback if timezone conversion fails
-                    conn_time_str = conn_time.strftime("%H:%M:%S")
+                    conn_time_str = conn_time.strftime("%Y-%m-%d %H:%M:%S")
                     conn_ts = conn_time.timestamp()
                 
                 unique_clients[ip] = {
                     'ip': ip,
                     'status': 'connected',
-                    'duration': f"{int(duration)}s",
+                    'duration': duration_str,
                     'duration_seconds': duration,
                     'connected_time': conn_time_str,
                     'connected_ts': conn_ts,
@@ -145,26 +153,34 @@ def setup_device(device_number: int):
             if ip not in unique_clients or disc_time > unique_clients[ip].get('disc_time', datetime.min.replace(tzinfo=conn_time.tzinfo)):
                 duration = (disc_time - conn_time).total_seconds()
                 
+                # Format duration as dd-hh-mm-ss fixed width
+                dur_int = int(duration)
+                days = dur_int // 86400
+                hours = (dur_int % 86400) // 3600
+                minutes = (dur_int % 3600) // 60
+                seconds = dur_int % 60
+                duration_str = f"{days:02d}d {hours:02d}h {minutes:02d}m {seconds:02d}s"
+
                 try:
                     # Convert timestamps to current timezone
                     tz = ZoneInfo(monitor.alpaca_config.timezone)
                     local_conn_time = conn_time.astimezone(tz)
                     local_disc_time = disc_time.astimezone(tz)
-                    conn_time_str = local_conn_time.strftime("%H:%M:%S")
-                    disc_time_str = local_disc_time.strftime("%H:%M:%S")
+                    conn_time_str = local_conn_time.strftime("%Y-%m-%d %H:%M:%S")
+                    disc_time_str = local_disc_time.strftime("%Y-%m-%d %H:%M:%S")
                     conn_ts = local_conn_time.timestamp()
                     disc_ts = local_disc_time.timestamp()
                 except Exception:
                     # Fallback if timezone conversion fails
-                    conn_time_str = conn_time.strftime("%H:%M:%S")
-                    disc_time_str = disc_time.strftime("%H:%M:%S")
+                    conn_time_str = conn_time.strftime("%Y-%m-%d %H:%M:%S")
+                    disc_time_str = disc_time.strftime("%Y-%m-%d %H:%M:%S")
                     conn_ts = conn_time.timestamp()
                     disc_ts = disc_time.timestamp()
                 
                 unique_clients[ip] = {
                     'ip': ip,
                     'status': 'disconnected',
-                    'duration': f"{int(duration)}s",
+                    'duration': duration_str,
                     'duration_seconds': duration,
                     'connected_time': conn_time_str,
                     'connected_ts': conn_ts,
