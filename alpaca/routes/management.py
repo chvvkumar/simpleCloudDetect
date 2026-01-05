@@ -101,70 +101,80 @@ def setup_device(device_number: int):
     ascom_status_class = "status-connected" if monitor.is_connected else "status-disconnected"
     client_count = len(monitor.connected_clients)
     
-    # Build client list
+    # Build client list - show unique clients by IP with most recent connection info
     client_list = []
     with monitor.connection_lock:
-        # Get set of currently connected IPs
-        connected_ips = {ip for (ip, client_id) in monitor.connected_clients.keys()}
+        # Dictionary to track unique clients by IP
+        unique_clients = {}
         
+        # Process connected clients first (they take priority)
         for (ip, client_id), conn_time in monitor.connected_clients.items():
-            duration = (get_current_time(monitor.alpaca_config.timezone) - conn_time).total_seconds()
-            
-            try:
-                # Convert timestamp to current timezone
-                tz = ZoneInfo(monitor.alpaca_config.timezone)
-                local_conn_time = conn_time.astimezone(tz)
-                conn_time_str = local_conn_time.strftime("%H:%M:%S")
-                conn_ts = local_conn_time.timestamp()
-            except Exception:
-                # Fallback if timezone conversion fails
-                conn_time_str = conn_time.strftime("%H:%M:%S")
-                conn_ts = conn_time.timestamp()
-            
-            client_list.append({
-                'ip': ip,
-                'status': 'connected',
-                'duration': f"{int(duration)}s",
-                'duration_seconds': duration,
-                'connected_time': conn_time_str,
-                'connected_ts': conn_ts,
-                'disconnected_time': '-',
-                'disconnected_ts': 0
-            })
-        
-        # Only show disconnected clients if their IP is not currently connected
-        for (ip, client_id), (conn_time, disc_time) in monitor.disconnected_clients.items():
-            if ip in connected_ips:
-                continue  # Skip disconnected entries for IPs that are currently connected
+            if ip not in unique_clients or conn_time > unique_clients[ip]['conn_time']:
+                duration = (get_current_time(monitor.alpaca_config.timezone) - conn_time).total_seconds()
                 
-            duration = (disc_time - conn_time).total_seconds()
+                try:
+                    # Convert timestamp to current timezone
+                    tz = ZoneInfo(monitor.alpaca_config.timezone)
+                    local_conn_time = conn_time.astimezone(tz)
+                    conn_time_str = local_conn_time.strftime("%H:%M:%S")
+                    conn_ts = local_conn_time.timestamp()
+                except Exception:
+                    # Fallback if timezone conversion fails
+                    conn_time_str = conn_time.strftime("%H:%M:%S")
+                    conn_ts = conn_time.timestamp()
+                
+                unique_clients[ip] = {
+                    'ip': ip,
+                    'status': 'connected',
+                    'duration': f"{int(duration)}s",
+                    'duration_seconds': duration,
+                    'connected_time': conn_time_str,
+                    'connected_ts': conn_ts,
+                    'disconnected_time': '-',
+                    'disconnected_ts': 0,
+                    'conn_time': conn_time  # Track for comparison
+                }
+        
+        # Process disconnected clients only if IP not currently connected
+        for (ip, client_id), (conn_time, disc_time) in monitor.disconnected_clients.items():
+            # Skip if IP is currently connected
+            if ip in unique_clients and unique_clients[ip]['status'] == 'connected':
+                continue
             
-            try:
-                # Convert timestamps to current timezone
-                tz = ZoneInfo(monitor.alpaca_config.timezone)
-                local_conn_time = conn_time.astimezone(tz)
-                local_disc_time = disc_time.astimezone(tz)
-                conn_time_str = local_conn_time.strftime("%H:%M:%S")
-                disc_time_str = local_disc_time.strftime("%H:%M:%S")
-                conn_ts = local_conn_time.timestamp()
-                disc_ts = local_disc_time.timestamp()
-            except Exception:
-                # Fallback if timezone conversion fails
-                conn_time_str = conn_time.strftime("%H:%M:%S")
-                disc_time_str = disc_time.strftime("%H:%M:%S")
-                conn_ts = conn_time.timestamp()
-                disc_ts = disc_time.timestamp()
-            
-            client_list.append({
-                'ip': ip,
-                'status': 'disconnected',
-                'duration': f"{int(duration)}s",
-                'duration_seconds': duration,
-                'connected_time': conn_time_str,
-                'connected_ts': conn_ts,
-                'disconnected_time': disc_time_str,
-                'disconnected_ts': disc_ts
-            })
+            # Only add or update if this is the most recent disconnection for this IP
+            if ip not in unique_clients or disc_time > unique_clients[ip].get('disc_time', datetime.min.replace(tzinfo=conn_time.tzinfo)):
+                duration = (disc_time - conn_time).total_seconds()
+                
+                try:
+                    # Convert timestamps to current timezone
+                    tz = ZoneInfo(monitor.alpaca_config.timezone)
+                    local_conn_time = conn_time.astimezone(tz)
+                    local_disc_time = disc_time.astimezone(tz)
+                    conn_time_str = local_conn_time.strftime("%H:%M:%S")
+                    disc_time_str = local_disc_time.strftime("%H:%M:%S")
+                    conn_ts = local_conn_time.timestamp()
+                    disc_ts = local_disc_time.timestamp()
+                except Exception:
+                    # Fallback if timezone conversion fails
+                    conn_time_str = conn_time.strftime("%H:%M:%S")
+                    disc_time_str = disc_time.strftime("%H:%M:%S")
+                    conn_ts = conn_time.timestamp()
+                    disc_ts = disc_time.timestamp()
+                
+                unique_clients[ip] = {
+                    'ip': ip,
+                    'status': 'disconnected',
+                    'duration': f"{int(duration)}s",
+                    'duration_seconds': duration,
+                    'connected_time': conn_time_str,
+                    'connected_ts': conn_ts,
+                    'disconnected_time': disc_time_str,
+                    'disconnected_ts': disc_ts,
+                    'disc_time': disc_time  # Track for comparison
+                }
+        
+        # Convert to list
+        client_list = list(unique_clients.values())
     
     # Safety history (newest first - reverse chronological)
     safety_history = []
