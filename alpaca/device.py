@@ -6,10 +6,13 @@ import logging
 import io
 import json
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 import paho.mqtt.client as mqtt
 from PIL import Image
+
+# Watchdog constants
+CLIENT_TIMEOUT_SECONDS = 300  # 5 Minutes
 
 # Import from sibling modules
 from .config import AlpacaConfig, get_current_time
@@ -158,6 +161,31 @@ class AlpacaSafetyMonitor:
                                      f"(class={class_name}, confidence={confidence:.1f}%, "
                                      f"threshold={threshold:.1f}%, debounce={elapsed_time:.1f}s)")
     
+    def _prune_stale_clients(self):
+        """Remove clients that haven't been seen for CLIENT_TIMEOUT_SECONDS (assumes lock is held)"""
+        now = get_current_time(self.alpaca_config.timezone)
+        cutoff_time = now - timedelta(seconds=CLIENT_TIMEOUT_SECONDS)
+        
+        stale_clients = []
+        for key, last_seen in list(self.connected_clients.items()):
+            if last_seen < cutoff_time:
+                stale_clients.append(key)
+        
+        for key in stale_clients:
+            client_ip, client_id = key
+            conn_time = self.connected_clients[key]
+            self.disconnected_clients[key] = (conn_time, now)
+            del self.connected_clients[key]
+            logger.warning(f"Watchdog: Pruned stale client {client_ip} (ID: {client_id}) - "
+                          f"inactive for {(now - conn_time).total_seconds():.0f}s")
+    
+    def register_heartbeat(self, client_ip: str, client_id: int):
+        """Update the last seen timestamp for a connected client"""
+        with self.connection_lock:
+            key = (client_ip, client_id)
+            if key in self.connected_clients:
+                self.connected_clients[key] = get_current_time(self.alpaca_config.timezone)
+    
     def _setup_mqtt(self):
         """Setup and return MQTT client based on detect_config"""
         if not self.detect_config.broker:
@@ -299,6 +327,7 @@ class AlpacaSafetyMonitor:
     def is_connected(self) -> bool:
         """Check if any clients are connected"""
         with self.connection_lock:
+            self._prune_stale_clients()
             return len(self.connected_clients) > 0
 
     def connect(self, client_ip: str, client_id: int):
@@ -321,6 +350,7 @@ class AlpacaSafetyMonitor:
     def disconnect(self, client_ip: str = None, client_id: int = None):
         """Disconnect a client from the device"""
         with self.connection_lock:
+            self._prune_stale_clients()
             if client_ip is None or client_id is None:
                 # Disconnect all
                 for key in list(self.connected_clients.keys()):
