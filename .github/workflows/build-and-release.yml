@@ -35,10 +35,17 @@ jobs:
       release_type: ${{ steps.version.outputs.release_type }}
       docker_tag: ${{ steps.docker_tags.outputs.tag }}
     steps:
+      - name: Clean workspace
+        if: always()
+        run: |
+          sudo chown -R $USER:$USER ${{ github.workspace }} || true
+          sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
+      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: false
       
       - name: Determine Docker tags and cache
         id: docker_tags
@@ -145,10 +152,17 @@ jobs:
             platform: linux/arm64
             platform_tag: arm64
     steps:
+      - name: Clean workspace
+        if: always()
+        run: |
+          sudo chown -R $USER:$USER ${{ github.workspace }} || true
+          sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
+      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: false
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -192,7 +206,9 @@ jobs:
         if: always()
         run: |
           rm -rf ${{ env.CACHE_PATH }}
-          mv ${{ env.CACHE_PATH_NEW }} ${{ env.CACHE_PATH }}
+          if [ -d "${{ env.CACHE_PATH_NEW }}" ]; then
+            mv ${{ env.CACHE_PATH_NEW }} ${{ env.CACHE_PATH }}
+          fi
 
   merge:
     name: Merge Multi-Arch Image
@@ -229,6 +245,8 @@ jobs:
       - name: Checkout repository
         if: github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
+        with:
+          clean: false
       
       - name: Docker Hub Description
         if: github.ref == 'refs/heads/main'
@@ -252,6 +270,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        clean: false
     
     - name: Generate commit history
       id: changelog
@@ -350,6 +369,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: false
 
       - name: Collect commit information
         id: collect
