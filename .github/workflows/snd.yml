@@ -27,12 +27,13 @@ jobs:
         if: always()
         run: |
           sudo chown -R $USER:$USER ${{ github.workspace }} || true
-          rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
       
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: snd
+          clean: false
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
