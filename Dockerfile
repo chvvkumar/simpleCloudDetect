@@ -17,6 +17,8 @@ COPY requirements.txt requirements-arm64.txt ./
 # Install dependencies based on architecture
 ARG TARGETPLATFORM
 RUN pip install --no-cache-dir --upgrade pip && \
+    export MAKEFLAGS="-j$(nproc)" && \
+    export MAX_JOBS="$(nproc)" && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; \
     then \
         pip install --no-cache-dir -r requirements-arm64.txt; \
