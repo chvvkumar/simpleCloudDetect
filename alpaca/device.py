@@ -32,7 +32,8 @@ class AlpacaSafetyMonitor:
         self.transaction_lock = threading.Lock()
         
         # Device state
-        self.connected_clients: Dict[Tuple[str, int], datetime] = {}  # (IP, ClientID) -> ConnectionTime
+        self.connected_clients: Dict[Tuple[str, int], datetime] = {}  # (IP, ClientID) -> Connection Start Time
+        self.client_last_seen: Dict[Tuple[str, int], datetime] = {}   # (IP, ClientID) -> Last Heartbeat Time
         self.disconnected_clients: Dict[Tuple[str, int], Tuple[datetime, datetime]] = {}  # (IP, ClientID) -> (ConnectionTime, DisconnectionTime)
         self.connection_lock = threading.Lock()
         self.connecting = False
@@ -167,24 +168,36 @@ class AlpacaSafetyMonitor:
         cutoff_time = now - timedelta(seconds=CLIENT_TIMEOUT_SECONDS)
         
         stale_clients = []
-        for key, last_seen in list(self.connected_clients.items()):
+        # Check last_seen for staleness, not initial connection time
+        for key, last_seen in list(self.client_last_seen.items()):
             if last_seen < cutoff_time:
                 stale_clients.append(key)
         
         for key in stale_clients:
             client_ip, client_id = key
-            conn_time = self.connected_clients[key]
+            
+            # Retrieve original connection time for the record
+            conn_time = self.connected_clients.get(key, now)
+            
+            # Move to disconnected list
             self.disconnected_clients[key] = (conn_time, now)
-            del self.connected_clients[key]
+            
+            # Remove from active tracking
+            if key in self.connected_clients:
+                del self.connected_clients[key]
+            if key in self.client_last_seen:
+                del self.client_last_seen[key]
+                
             logger.warning(f"Watchdog: Pruned stale client {client_ip} (ID: {client_id}) - "
-                          f"inactive for {(now - conn_time).total_seconds():.0f}s")
+                          f"inactive for {(now - last_seen).total_seconds():.0f}s")
     
     def register_heartbeat(self, client_ip: str, client_id: int):
         """Update the last seen timestamp for a connected client"""
         with self.connection_lock:
             key = (client_ip, client_id)
             if key in self.connected_clients:
-                self.connected_clients[key] = get_current_time(self.alpaca_config.timezone)
+                # Only update last_seen, preserve connected_clients (start time)
+                self.client_last_seen[key] = get_current_time(self.alpaca_config.timezone)
     
     def _setup_mqtt(self):
         """Setup and return MQTT client based on detect_config"""
@@ -334,7 +347,9 @@ class AlpacaSafetyMonitor:
         """Connect a client to the device"""
         with self.connection_lock:
             key = (client_ip, client_id)
-            self.connected_clients[key] = get_current_time(self.alpaca_config.timezone)
+            current_time = get_current_time(self.alpaca_config.timezone)
+            self.connected_clients[key] = current_time
+            self.client_last_seen[key] = current_time
             
             # Remove from disconnected clients if reconnecting
             if key in self.disconnected_clients:
@@ -358,6 +373,7 @@ class AlpacaSafetyMonitor:
                     disc_time = get_current_time(self.alpaca_config.timezone)
                     self.disconnected_clients[key] = (conn_time, disc_time)
                 self.connected_clients.clear()
+                self.client_last_seen.clear()
                 self.disconnected_at = disc_time
                 if self.connected_at:
                     duration = (self.disconnected_at - self.connected_at).total_seconds()
@@ -372,6 +388,9 @@ class AlpacaSafetyMonitor:
                     self.disconnected_clients[key] = (conn_time, disc_time)
                     
                     del self.connected_clients[key]
+                    if key in self.client_last_seen:
+                        del self.client_last_seen[key]
+                        
                     logger.info(f"Client disconnected: {client_ip} (ID: {client_id}). Total clients: {len(self.connected_clients)}")
                     
                     if len(self.connected_clients) == 0:
