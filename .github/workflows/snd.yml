@@ -23,6 +23,12 @@ jobs:
             platform: linux/arm64
             platform_tag: arm64
     steps:
+      - name: Clean workspace
+        if: always()
+        run: |
+          sudo chown -R $USER:$USER ${{ github.workspace }} || true
+          rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
+      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -70,7 +76,9 @@ jobs:
         if: always()
         run: |
           rm -rf ${{ env.CACHE_PATH }}
-          mv ${{ env.CACHE_PATH_NEW }} ${{ env.CACHE_PATH }}
+          if [ -d "${{ env.CACHE_PATH_NEW }}" ]; then
+            mv ${{ env.CACHE_PATH_NEW }} ${{ env.CACHE_PATH }}
+          fi
 
   merge:
     name: Merge Multi-Arch Image
@@ -102,5 +110,3 @@ jobs:
           docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd
           IMAGE_SIZE=$(docker images --format "{{.Size}}" ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:snd | head -n1)
           echo "Docker image size: $IMAGE_SIZE"
-
-          
