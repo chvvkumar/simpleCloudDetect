@@ -39,7 +39,7 @@ jobs:
         if: always()
         run: |
           sudo chown -R $USER:$USER ${{ github.workspace }} || true
-          rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
       
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -156,7 +156,7 @@ jobs:
         if: always()
         run: |
           sudo chown -R $USER:$USER ${{ github.workspace }} || true
-          rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
+          sudo rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.* 2>/dev/null || true
       
       - name: Checkout repository
         uses: actions/checkout@v4
