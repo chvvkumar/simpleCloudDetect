@@ -199,7 +199,7 @@ jobs:
           tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:${{ needs.prepare.outputs.docker_tag }}-${{ matrix.platform_tag }}
           # Use persistent cache on self-hosted runner
           cache-from: type=local,src=${{ env.CACHE_PATH }}
-          cache-to: type=local,dest=${{ env.CACHE_PATH_NEW }},mode=min
+          cache-to: type=local,dest=${{ env.CACHE_PATH_NEW }},mode=max
           platforms: ${{ matrix.platform }}
       
       - name: Move cache
