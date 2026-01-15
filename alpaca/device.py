@@ -15,7 +15,7 @@ from PIL import Image
 CLIENT_TIMEOUT_SECONDS = 300  # 5 Minutes
 
 # Import from sibling modules
-from .config import AlpacaConfig, get_current_time
+from .config import AlpacaConfig, get_current_time, ALL_CLOUD_CONDITIONS
 # Assuming detect.py is in the root path or installed as a package
 from detect import CloudDetector, Config as DetectConfig, HADiscoveryManager
 
@@ -229,6 +229,14 @@ class AlpacaSafetyMonitor:
             # Return image so we can process thumbnail
             result = self.cloud_detector.detect(return_image=True)
             result['timestamp'] = get_current_time(self.alpaca_config.timezone)
+            
+            # FIX: Normalize class name case to match configuration (Title Case preference)
+            # This handles cases where detection returns "mostly cloudy" but config expects "Mostly Cloudy"
+            raw_class = result.get('class_name', '')
+            for known_cond in ALL_CLOUD_CONDITIONS:
+                if known_cond.lower() == raw_class.lower():
+                    result['class_name'] = known_cond
+                    break
             
             # OPTIMIZATION: Convert to bytes immediately and drop the PIL Object
             image_bytes = None
