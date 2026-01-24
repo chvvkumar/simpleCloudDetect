@@ -126,7 +126,33 @@ class AlpacaConfig:
                 
                 # Filter dictionary to only include valid fields for this dataclass
                 valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
-                return {k: v for k, v in config_dict.items() if k in valid_fields}
+                settings = {k: v for k, v in config_dict.items() if k in valid_fields}
+
+                # Sanitize loaded settings against current labels from labels.txt
+                # Remove saved 'unsafe_conditions' that are no longer in ALL_CLOUD_CONDITIONS
+                if 'unsafe_conditions' in settings:
+                    valid_labels = set(ALL_CLOUD_CONDITIONS)
+                    original_count = len(settings['unsafe_conditions'])
+                    settings['unsafe_conditions'] = [
+                        c for c in settings['unsafe_conditions'] 
+                        if c in valid_labels
+                    ]
+                    removed_count = original_count - len(settings['unsafe_conditions'])
+                    if removed_count > 0:
+                        logger.info(f"Removed {removed_count} obsolete unsafe condition(s) from saved configuration")
+                
+                # Clean up stale class thresholds
+                if 'class_thresholds' in settings:
+                    original_count = len(settings['class_thresholds'])
+                    settings['class_thresholds'] = {
+                        k: v for k, v in settings['class_thresholds'].items()
+                        if k in ALL_CLOUD_CONDITIONS
+                    }
+                    removed_count = original_count - len(settings['class_thresholds'])
+                    if removed_count > 0:
+                        logger.info(f"Removed {removed_count} obsolete class threshold(s) from saved configuration")
+
+                return settings
         except Exception as e:
             logger.error(f"Failed to load configuration from {filepath}: {e}")
         return {}
