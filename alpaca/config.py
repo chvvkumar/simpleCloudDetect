@@ -28,8 +28,32 @@ ERROR_INVALID_VALUE = 0x401    # 1025
 ERROR_NOT_CONNECTED = 0x407    # 1031
 ERROR_UNSPECIFIED = 0x500      # 1280
 
-# Available cloud conditions from ML model
-ALL_CLOUD_CONDITIONS = ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
+# Dynamically load cloud conditions from labels file
+def load_labels():
+    """Load cloud condition labels from labels.txt file"""
+    label_path = os.environ.get('LABEL_PATH', 'labels.txt')
+    try:
+        if os.path.exists(label_path):
+            with open(label_path, 'r') as f:
+                labels = []
+                for line in f:
+                    clean_line = line.strip()
+                    # Handle "0 Clear" format if present
+                    if " " in clean_line and clean_line.split(" ", 1)[0].isdigit():
+                        clean_line = clean_line.split(" ", 1)[1]
+                    if clean_line:
+                        labels.append(clean_line)
+            logger.info(f"Loaded {len(labels)} classes from {label_path}")
+            return labels
+    except Exception as e:
+        logger.error(f"Failed to load labels from {label_path}: {e}")
+    
+    # Fallback to defaults if file missing or error
+    logger.warning("Using fallback default cloud conditions")
+    return ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
+
+# Available cloud conditions from ML model (loaded dynamically from labels.txt)
+ALL_CLOUD_CONDITIONS = load_labels()
 
 
 @dataclass
