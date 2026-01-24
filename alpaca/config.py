@@ -70,7 +70,7 @@ class AlpacaConfig:
     update_interval: int = 30  # seconds between cloud detection updates
     location: str = "AllSky Camera"
     image_url: str = field(default_factory=lambda: os.environ.get('IMAGE_URL', ''))
-    unsafe_conditions: list = field(default_factory=lambda: ['Rain', 'Snow', 'Mostly Cloudy', 'Overcast'])
+    unsafe_conditions: list = field(default_factory=lambda: ALL_CLOUD_CONDITIONS.copy())
     
     # Confidence threshold settings
     default_threshold: float = 50.0  # Default threshold for any class not explicitly configured
