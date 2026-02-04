@@ -86,7 +86,7 @@ def setup_device(device_number: int):
     
     # Format timestamp
     if timestamp:
-        last_update = timestamp.strftime("%H:%M:%S")
+        last_update = timestamp.strftime("%Y-%m-%d %H:%M:%S")
     else:
         last_update = "N/A"
     
@@ -99,11 +99,15 @@ def setup_device(device_number: int):
     # Connection status
     ascom_status = "Connected" if monitor.is_connected else "Disconnected"
     ascom_status_class = "status-connected" if monitor.is_connected else "status-disconnected"
-    client_count = len(monitor.connected_clients)
     
     # Build client list - show unique clients by IP with most recent connection info
     client_list = []
     with monitor.connection_lock:
+        # Prune stale clients before building list
+        monitor._prune_stale_clients()
+        
+        # Get client count inside the lock for consistency
+        client_count = len(monitor.connected_clients)
         # Dictionary to track unique clients by IP
         unique_clients = {}
         
@@ -200,10 +204,10 @@ def setup_device(device_number: int):
                 # Convert timestamp to current timezone
                 tz = ZoneInfo(monitor.alpaca_config.timezone)
                 converted_time = entry['timestamp'].astimezone(tz)
-                time_str = converted_time.strftime("%H:%M:%S")
+                time_str = converted_time.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 # Fallback if timezone conversion fails
-                time_str = entry['timestamp'].strftime("%H:%M:%S")
+                time_str = entry['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
             
             safety_history.append({
                 'is_safe': entry['is_safe'],

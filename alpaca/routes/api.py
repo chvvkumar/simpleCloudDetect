@@ -78,13 +78,16 @@ def get_latest_image():
 
 @api_bp.route('/v1/safetymonitor/<int:device_number>/connected', methods=['GET'])
 def get_connected(device_number: int):
-    """Get connection state"""
+    """Get connection state for this specific client"""
     error_response = validate_device_number(device_number)
     if error_response:
         return error_response
-    _, client_tx_id = monitor.get_client_params()
+    client_id, client_tx_id = monitor.get_client_params()
+    client_ip = request.remote_addr
+    # Return per-client connection state, not global state
+    is_client_connected = monitor.is_client_connected(client_ip, client_id)
     return jsonify(monitor.create_response(
-        value=monitor.is_connected,
+        value=is_client_connected,
         client_transaction_id=client_tx_id
     ))
 

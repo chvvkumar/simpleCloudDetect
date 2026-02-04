@@ -8,6 +8,7 @@ from .config import AlpacaConfig
 from .device import AlpacaSafetyMonitor
 from .routes.api import api_bp, init_api
 from .routes.management import mgmt_bp, init_mgmt
+from .routes.external_api import external_api_bp, init_external_api
 from detect import Config as DetectConfig
 
 def create_app():
@@ -47,10 +48,12 @@ def create_app():
     # Initialize Routes with Monitor Instance
     init_api(safety_monitor)
     init_mgmt(safety_monitor)
+    init_external_api(safety_monitor)
     
     # Register Blueprints
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(mgmt_bp, url_prefix='')
+    app.register_blueprint(external_api_bp)
     
     # Store monitor for access in main.py
     app.safety_monitor = safety_monitor
