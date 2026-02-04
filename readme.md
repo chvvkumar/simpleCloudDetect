@@ -26,8 +26,10 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
   - [Docker Compose Examples](#docker-compose-examples)
 - [Home Assistant Integration](#home-assistant-integration)
 - [ASCOM Alpaca SafetyMonitor](#ascom-alpaca-safetymonitor)
+- [External REST API](#external-rest-api)
 - [Training Your Own Model](#training-your-own-model)
 - [Recent Changes](#recent-changes)
+- [Documentation](#documentation)
 
 ---
 
@@ -36,6 +38,7 @@ A Machine Learning-based cloud detection system for AllSky cameras with MQTT and
 - **ML Cloud Classification** - Detects Clear, Wisps, Mostly Cloudy, Overcast, Rain, and Snow conditions
 - **Home Assistant Integration** - MQTT Discovery for automatic setup or legacy manual configuration
 - **ASCOM Alpaca SafetyMonitor** - Compatible with N.I.N.A., SGP, TheSkyX, and other astronomy software
+- **External REST API** - Flexible JSON API for dashboards, monitoring systems, and custom integrations
 - **Docker Support** - Easy deployment with both services running simultaneously
 - **Flexible Image Sources** - Supports URL-based and local file images
 - **Custom Models** - Bring your own trained model and labels
@@ -414,7 +417,51 @@ The container includes an ASCOM Alpaca SafetyMonitor service (Interface Version 
 
 ![N.I.N.A. Integration](/images/NINA.jpg)
 
-> **Full Documentation**: See **[ALPACA_README.md](ALPACA_README.md)** for detailed configuration, API reference, and troubleshooting.
+> **Full Documentation**: See **[docs/ALPACA_README.md](docs/ALPACA_README.md)** for detailed configuration, API reference, and troubleshooting.
+
+---
+
+## External REST API
+
+SimpleCloudDetect provides a separate REST API designed for external integrations like dashboards, monitoring systems, and custom scripts.
+
+### Quick Example
+
+**Get Current Status:**
+```bash
+curl http://localhost:11111/api/ext/v1/status
+```
+
+**Response:**
+```json
+{
+  "is_safe": true,
+  "safety_status": "Safe",
+  "detection": {
+    "class_name": "Clear",
+    "confidence_score": 0.9823,
+    "timestamp": "2026-02-04T15:30:45.123456"
+  }
+}
+```
+
+### Available Endpoints
+
+- **`/api/ext/v1/system`** - System information and uptime
+- **`/api/ext/v1/status`** - Current safety status and detection
+- **`/api/ext/v1/config`** - Configuration settings
+- **`/api/ext/v1/clients`** - Connected ASCOM clients
+- **`/api/ext/v1/history`** - Safety state transition history
+- **`/api/ext/v1/image`** - Latest detection image (JPEG)
+
+### Use Cases
+
+- Build custom monitoring dashboards
+- Integrate with non-MQTT home automation systems
+- Create analytics and reporting scripts
+- Monitor device health and client connections
+
+> **Full Documentation**: See **[docs/EXTERNAL_API.md](docs/EXTERNAL_API.md)** for complete API reference, examples, and integration guides.
 
 ---
 
@@ -471,8 +518,9 @@ docker run -d --name simple-cloud-detect --network=host \
 ## Documentation
 
 - **[Main Documentation](readme.md)** - This file
-- **[System Architecture](architecture.md)** - A detailed look at the components and data flow.
-- **[Alpaca SafetyMonitor Guide](ALPACA_README.md)** - ASCOM Alpaca implementation details
+- **[System Architecture](architecture.md)** - A detailed look at the components and data flow
+- **[ASCOM Alpaca SafetyMonitor Guide](docs/ALPACA_README.md)** - Standard ASCOM API implementation details
+- **[External REST API Guide](docs/EXTERNAL_API.md)** - Custom REST API for dashboards and integrations
 
 ---
 
