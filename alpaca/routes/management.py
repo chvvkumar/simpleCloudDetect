@@ -84,6 +84,9 @@ def setup_device(device_number: int):
     ascom_safe_status = "SAFE" if is_safe else "UNSAFE"
     ascom_safe_color = "rgb(52, 211, 153)" if is_safe else "rgb(248, 113, 113)"
     
+    # Get pending status
+    pending_status = monitor.get_pending_status()
+    
     # Format timestamp
     if timestamp:
         last_update = timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -245,7 +248,8 @@ def setup_device(device_number: int):
         safe_conditions=safe_cond,
         unsafe_conditions=unsafe_cond,
         default_threshold=monitor.alpaca_config.default_threshold,
-        class_thresholds=monitor.alpaca_config.class_thresholds
+        class_thresholds=monitor.alpaca_config.class_thresholds,
+        pending_status=pending_status
     )
 
 
