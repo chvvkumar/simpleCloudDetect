@@ -7,7 +7,7 @@ import io
 import json
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import paho.mqtt.client as mqtt
 from PIL import Image
 
@@ -194,6 +194,9 @@ class AlpacaSafetyMonitor:
     def register_heartbeat(self, client_ip: str, client_id: int):
         """Update the last seen timestamp for a connected client"""
         with self.connection_lock:
+            # Prune stale clients during heartbeat (periodic cleanup)
+            self._prune_stale_clients()
+            
             key = (client_ip, client_id)
             if key in self.connected_clients:
                 # Only update last_seen, preserve connected_clients (start time)
@@ -348,12 +351,20 @@ class AlpacaSafetyMonitor:
     def is_connected(self) -> bool:
         """Check if any clients are connected"""
         with self.connection_lock:
-            self._prune_stale_clients()
             return len(self.connected_clients) > 0
+    
+    def is_client_connected(self, client_ip: str, client_id: int) -> bool:
+        """Check if a specific client is connected"""
+        with self.connection_lock:
+            key = (client_ip, client_id)
+            return key in self.connected_clients
 
     def connect(self, client_ip: str, client_id: int):
         """Connect a client to the device"""
         with self.connection_lock:
+            # Prune stale clients BEFORE adding new connection
+            self._prune_stale_clients()
+            
             key = (client_ip, client_id)
             current_time = get_current_time(self.alpaca_config.timezone)
             self.connected_clients[key] = current_time
@@ -373,13 +384,13 @@ class AlpacaSafetyMonitor:
     def disconnect(self, client_ip: str = None, client_id: int = None):
         """Disconnect a client from the device"""
         with self.connection_lock:
-            self._prune_stale_clients()
             if client_ip is None or client_id is None:
-                # Disconnect all
+                # Disconnect all - IMMEDIATE state change
+                disc_time = get_current_time(self.alpaca_config.timezone)
                 for key in list(self.connected_clients.keys()):
                     conn_time = self.connected_clients[key]
-                    disc_time = get_current_time(self.alpaca_config.timezone)
                     self.disconnected_clients[key] = (conn_time, disc_time)
+                
                 self.connected_clients.clear()
                 self.client_last_seen.clear()
                 self.disconnected_at = disc_time
@@ -420,6 +431,54 @@ class AlpacaSafetyMonitor:
         with self.detection_lock:
             return self._stable_safe_state
     
+    def get_pending_status(self) -> Dict[str, Any]:
+        """Get information about any pending state changes"""
+        with self.detection_lock:
+            if self._pending_safe_state is None or self._state_change_start_time is None:
+                return {'is_pending': False}
+            
+            now = get_current_time(self.alpaca_config.timezone)
+            elapsed = (now - self._state_change_start_time).total_seconds()
+            
+            if self._pending_safe_state:
+                required = self.alpaca_config.debounce_to_safe_sec
+            else:
+                required = self.alpaca_config.debounce_to_unsafe_sec
+                
+            remaining = max(0, required - elapsed)
+            
+            return {
+                'is_pending': True,
+                'target_state': 'SAFE' if self._pending_safe_state else 'UNSAFE',
+                'target_color': 'rgb(52, 211, 153)' if self._pending_safe_state else 'rgb(248, 113, 113)',
+                'remaining_seconds': round(remaining, 1),
+                'total_duration': required
+            }
+    
+    def get_safety_history(self) -> List[Dict[str, Any]]:
+        """Get a thread-safe copy of the safety history"""
+        with self.detection_lock:
+            return list(self._safety_history)
+
+    def get_connected_clients_info(self) -> List[Dict[str, Any]]:
+        """Get detailed information about connected clients"""
+        clients = []
+        now = get_current_time(self.alpaca_config.timezone)
+        with self.connection_lock:
+            # Prune stale clients before returning list
+            self._prune_stale_clients()
+            
+            for (ip, client_id), conn_time in self.connected_clients.items():
+                last_seen = self.client_last_seen.get((ip, client_id))
+                clients.append({
+                    "ip": ip,
+                    "client_id": client_id,
+                    "connected_at": conn_time,
+                    "last_seen": last_seen,
+                    "duration_seconds": (now - conn_time).total_seconds()
+                })
+        return clients
+
     def get_device_state(self) -> list:
         """Get current operational state"""
         is_safe_val = self.is_safe()
