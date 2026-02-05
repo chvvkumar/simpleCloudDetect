@@ -431,6 +431,30 @@ class AlpacaSafetyMonitor:
         with self.detection_lock:
             return self._stable_safe_state
     
+    def get_pending_status(self) -> Dict[str, Any]:
+        """Get information about any pending state changes"""
+        with self.detection_lock:
+            if self._pending_safe_state is None or self._state_change_start_time is None:
+                return {'is_pending': False}
+            
+            now = get_current_time(self.alpaca_config.timezone)
+            elapsed = (now - self._state_change_start_time).total_seconds()
+            
+            if self._pending_safe_state:
+                required = self.alpaca_config.debounce_to_safe_sec
+            else:
+                required = self.alpaca_config.debounce_to_unsafe_sec
+                
+            remaining = max(0, required - elapsed)
+            
+            return {
+                'is_pending': True,
+                'target_state': 'SAFE' if self._pending_safe_state else 'UNSAFE',
+                'target_color': 'rgb(52, 211, 153)' if self._pending_safe_state else 'rgb(248, 113, 113)',
+                'remaining_seconds': round(remaining, 1),
+                'total_duration': required
+            }
+    
     def get_safety_history(self) -> List[Dict[str, Any]]:
         """Get a thread-safe copy of the safety history"""
         with self.detection_lock:
