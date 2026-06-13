@@ -32,6 +32,9 @@ Thumbs.db
 # Model files (users provide their own)
 keras_model.h5
 labels.txt
+model.onnx
+model.onnx.data
+model/
 
 # Config
 alpaca_config.json
