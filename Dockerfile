@@ -1,39 +1,72 @@
-# Use a lightweight Python base image
-FROM python:3.11-slim-bookworm
+# Use the official Python image from the Docker Hub
+FROM python:3.11-slim AS builder
 
-# Set working directory
+# Set the working directory
 WORKDIR /app
 
-# Install system dependencies (required for some Python packages)
-# - build-essential: for compiling some python extensions
-# - curl: for healthchecks
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
+    gcc \
+    g++ \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+# Copy ONLY requirements files first for better layer caching
+COPY requirements.txt requirements-arm64.txt ./
 
-# Install Python dependencies
-# Note: On ARM64 (Raspberry Pi), pip will automatically fetch the correct wheels
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies based on architecture (both target the ONNX stack)
+ARG TARGETPLATFORM
+RUN pip install --no-cache-dir --upgrade pip && \
+    export MAKEFLAGS="-j$(nproc)" && \
+    export MAX_JOBS="$(nproc)" && \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; \
+    then \
+        pip install --no-cache-dir -r requirements-arm64.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
-# Copy application code
-COPY alpaca_safety_monitor.py .
-COPY detect.py .
-COPY train_model.py .
+# Final stage
+FROM python:3.11-slim
 
-# Copy model and labels if they exist (will be mounted as volumes in production)
-COPY --chown=root:root labels.txt* ./
-COPY --chown=root:root model.onnx* ./
+WORKDIR /app
 
-# Expose the ASCOM Alpaca port
-EXPOSE 11111
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    dos2unix \
+    && rm -rf /var/lib/apt/lists/*
 
-# Healthcheck to ensure the web server is responding
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:11111/management/apiversions || exit 1
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser
 
-# Run the Alpaca Safety Monitor
-CMD ["python", "alpaca_safety_monitor.py"]
+# Copy Python packages and binaries from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code with ownership set explicitly during copy
+# No model files are baked: model.onnx and labels.txt arrive by bind mount.
+COPY --chown=appuser:appuser detect.py main.py start_services.sh ./
+COPY --chown=appuser:appuser alpaca/ ./alpaca/
+COPY --chown=appuser:appuser templates/ ./templates/
+
+# Fix line endings and make the startup script executable
+RUN dos2unix start_services.sh && \
+    chmod +x start_services.sh && \
+    chown appuser:appuser start_services.sh
+
+# Create configuration directory
+RUN mkdir -p /config && chown appuser:appuser /config
+
+# Switch to non-root user
+USER appuser
+
+# Set configuration file path
+ENV CONFIG_FILE=/config/alpaca_config.json
+
+# FIX: Add healthcheck to ensure container restarts if Python process hangs
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:${ALPACA_PORT:-11111}/api/v1/safetymonitor/${ALPACA_DEVICE_NUMBER:-0}/connected || exit 1
+
+# Run the startup script to launch unified service
+CMD ["./start_services.sh"]
