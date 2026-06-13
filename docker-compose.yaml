@@ -2,6 +2,7 @@ services:
   simpleclouddetect:
     build: .
     image: ${IMAGE:-chvvkumar/simpleclouddetect:pytorch}
+    container_name: simple-cloud-detect
     restart: unless-stopped
     ports:
       - "11111:11111/tcp"
@@ -30,6 +31,7 @@ services:
   simpleclouddetect-test:
     build: .
     image: ${IMAGE:-chvvkumar/simpleclouddetect:pytorch}
+    container_name: simple-cloud-detect-test
     restart: unless-stopped
     ports:
       - "11112:11112/tcp"

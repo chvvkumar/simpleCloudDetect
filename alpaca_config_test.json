@@ -1,0 +1,27 @@
+{
+  "port": 11112,
+  "device_number": 0,
+  "device_name": "SimpleCloudDetect",
+  "device_description": "ASCOM SafetyMonitor based on ML cloud detection",
+  "driver_info": "ASCOM Alpaca SafetyMonitor v2.0 - Cloud Detection Driver",
+  "driver_version": "2.0",
+  "interface_version": 3,
+  "detection_interval": 60,
+  "update_interval": 30,
+  "location": "AllSky Camera",
+  "image_url": "http://allskypi5.lan/current/tmp/resized_34.jpg",
+  "unsafe_conditions": [
+    "Clear",
+    "Mostly Cloudy",
+    "Overcast",
+    "Partly Cloudy",
+    "Rain",
+    "Snow"
+  ],
+  "default_threshold": 50.0,
+  "class_thresholds": {},
+  "debounce_to_safe_sec": 60,
+  "debounce_to_unsafe_sec": 0,
+  "ntp_server": "pool.ntp.org",
+  "timezone": "UTC"
+}
