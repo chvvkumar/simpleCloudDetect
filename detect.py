@@ -193,8 +193,8 @@ class CloudDetector:
         self.mqtt_client = mqtt_client if mqtt_client is not None else self._setup_mqtt()
         self.ha_discovery = None
         
-        # Initialize HA discovery if enabled
-        if self.config.mqtt_discovery_mode == 'homeassistant':
+        # Initialize HA discovery if enabled and an MQTT client exists
+        if self.mqtt_client and self.config.mqtt_discovery_mode == 'homeassistant':
             self.ha_discovery = HADiscoveryManager(self.config, self.mqtt_client)
             self.ha_discovery.publish_discovery_configs()
         
@@ -250,7 +250,12 @@ class CloudDetector:
                 if image_url.startswith("file://"):
                     # Handle file URLs
                     parsed = urllib.parse.urlparse(image_url)
-                    file_path = Path(parsed.path.lstrip('/'))  # Remove leading slashes
+                    path_str = urllib.parse.unquote(parsed.path)
+                    # On Windows, a path from a file URI might start with a slash (e.g., /C:/Users/...)
+                    # We remove it to create a valid absolute path.
+                    if os.name == 'nt' and path_str.startswith('/'):
+                        path_str = path_str[1:]
+                    file_path = Path(path_str)
                     if not file_path.exists():
                         raise FileNotFoundError(f"Image file not found: {file_path}")
                     with open(file_path, 'rb') as f:
@@ -340,6 +345,9 @@ class CloudDetector:
 
     def publish_result(self, result: dict):
         """Publish detection result to MQTT"""
+        if not self.mqtt_client:
+            return
+
         try:
             if self.config.mqtt_discovery_mode == 'homeassistant':
                 # Use HA discovery publishing
