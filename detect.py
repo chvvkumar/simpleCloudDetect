@@ -192,7 +192,8 @@ class CloudDetector:
         self.session = requests.Session()  # Reuse HTTP connections
         self.mqtt_client = mqtt_client if mqtt_client is not None else self._setup_mqtt()
         self.ha_discovery = None
-        
+        self._first_detection_logged = False
+
         # Initialize HA discovery if enabled and an MQTT client exists
         if self.mqtt_client and self.config.mqtt_discovery_mode == 'homeassistant':
             self.ha_discovery = HADiscoveryManager(self.config, self.mqtt_client)
@@ -202,7 +203,9 @@ class CloudDetector:
         """Load and return the ONNX model session"""
         try:
             # Use CPU Provider for Raspberry Pi
-            return ort.InferenceSession(self.config.model_path, providers=['CPUExecutionProvider'])
+            session = ort.InferenceSession(self.config.model_path, providers=['CPUExecutionProvider'])
+            logger.info(f"ONNX model loaded successfully from {self.config.model_path}")
+            return session
         except Exception as e:
             logger.error(f"Failed to load model from {self.config.model_path}: {e}")
             raise
@@ -292,24 +295,28 @@ class CloudDetector:
         img_data = img_data.transpose(2, 0, 1)
         return np.expand_dims(img_data, axis=0)
 
-    def detect(self) -> dict:
-        """Perform cloud detection on an image"""
+    def detect(self, return_image: bool = False) -> dict:
+        """Perform cloud detection on an image
+
+        Args:
+            return_image: If True, include the raw PIL Image in the result under 'image' key
+        """
         start_time = time.time()
-        
+
         try:
             # Load and preprocess image
             image = self._load_image(self.config.image_url)
             preprocessed_image = self._preprocess_image(image)
-            
+
             # Make prediction with ONNX
             input_name = self.model.get_inputs()[0].name
             outputs = self.model.run(None, {input_name: preprocessed_image})
-            
+
             # Softmax
             logits = outputs[0][0]
             probs = np.exp(logits) / np.sum(np.exp(logits))
             index = np.argmax(probs)
-            
+
             # FIX: Robust label parsing - handles "0 Clear" -> "Clear" format
             if index < len(self.class_names):
                 raw_label = self.class_names[index].strip()
@@ -320,25 +327,32 @@ class CloudDetector:
                     class_name = raw_label
             else:
                 class_name = "Unknown"
-            
+
             confidence_score = float(probs[index])
-            
-            # FIX: Force garbage collection to prevent memory fragmentation on Pi
-            del image
-            del preprocessed_image
-            gc.collect()
-            
+
             elapsed_time = time.time() - start_time
-            
+
             result = {
                 "class_name": class_name,
                 "confidence_score": round(confidence_score * 100, 2),
                 "Detection Time (Seconds)": round(elapsed_time, 2)
             }
-            
+
+            # Optionally include the raw image before cleanup
+            if return_image:
+                result['image'] = image.copy()  # Return a copy since we'll delete the original
+
+            # FIX: Force garbage collection to prevent memory fragmentation on Pi
+            del image
+            del preprocessed_image
+            gc.collect()
+
             logger.info(f"Detection: {result}")
+            if not self._first_detection_logged:
+                logger.info("First detection complete")
+                self._first_detection_logged = True
             return result
-            
+
         except Exception as e:
             logger.error(f"Detection failed: {e}")
             raise
