@@ -50,7 +50,7 @@ def load_labels():
     
     # Fallback to defaults if file missing or error
     logger.warning("Using fallback default cloud conditions")
-    return ['Clear', 'Mostly Cloudy', 'Overcast', 'Rain', 'Snow', 'Wisps of clouds']
+    return ['Clear', 'Mostly Cloudy', 'Overcast', 'Partly Cloudy', 'Rain', 'Snow']
 
 # Available cloud conditions from ML model (loaded dynamically from labels.txt)
 ALL_CLOUD_CONDITIONS = load_labels()
