@@ -1,0 +1,55 @@
+services:
+  simpleclouddetect:
+    build: .
+    image: ${IMAGE:-chvvkumar/simpleclouddetect:pytorch}
+    restart: unless-stopped
+    ports:
+      - "11111:11111/tcp"
+      - "32227:32227/udp"
+    environment:
+      - IMAGE_URL=${IMAGE_URL:-http://allskypi5.lan/current/tmp/resized_34.jpg}
+      - MODEL_PATH=/app/model.onnx
+      - LABEL_PATH=/app/labels.txt
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DEVICE_ID=clouddetect
+      - DEVICE_NAME=Cloud Detector
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - VERIFY_SSL=false
+      - ALPACA_PORT=11111
+      - ALPACA_DEVICE_NUMBER=0
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - ${PROD_MODEL_DIR:-/docker/simpleclouddetect}/model.onnx:/app/model.onnx
+      - ${PROD_MODEL_DIR:-/docker/simpleclouddetect}/labels.txt:/app/labels.txt
+      - ${PROD_CONFIG:-/docker/simpleclouddetect/alpaca_config.json}:/config/alpaca_config.json
+
+  simpleclouddetect-test:
+    build: .
+    image: ${IMAGE:-chvvkumar/simpleclouddetect:pytorch}
+    restart: unless-stopped
+    ports:
+      - "11112:11112/tcp"
+    environment:
+      - IMAGE_URL=${IMAGE_URL:-http://allskypi5.lan/current/tmp/resized_34.jpg}
+      - MODEL_PATH=/app/model.onnx
+      - LABEL_PATH=/app/labels.txt
+      - MQTT_BROKER=192.168.1.250
+      - MQTT_PORT=1883
+      - MQTT_DISCOVERY_MODE=homeassistant
+      - DEVICE_ID=clouddetect_test
+      - DEVICE_NAME=Test Cloud Detector
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - DETECT_INTERVAL=60
+      - VERIFY_SSL=false
+      - ALPACA_PORT=11112
+      - ALPACA_DEVICE_NUMBER=0
+      - ALPACA_UPDATE_INTERVAL=30
+    volumes:
+      - ${TEST_MODEL_DIR:-C:/Users/Kumar/git/simpleCloudDetect/testmodel}/model.onnx:/app/model.onnx
+      - ${TEST_MODEL_DIR:-C:/Users/Kumar/git/simpleCloudDetect/testmodel}/labels.txt:/app/labels.txt
+      - ${TEST_CONFIG:-C:/Users/Kumar/git/simpleCloudDetect/alpaca_config_test.json}:/config/alpaca_config.json
