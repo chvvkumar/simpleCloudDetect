@@ -1,6 +1,5 @@
 Clear
-Lightning
-Meteors
+Mostly Cloudy
 Overcast
 Partly Cloudy
 Rain
