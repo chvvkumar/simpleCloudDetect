@@ -28,13 +28,19 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
+
+      - name: Compute short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:pytorch
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:pytorch
+            ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:pytorch-${{ steps.vars.outputs.sha_short }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           platforms: linux/amd64,linux/arm64
