@@ -304,6 +304,8 @@ Confidence values are percentages (0-100). The histogram divides confidence into
       "max": 71.2,
       "buckets": [0, 0, 1, 4, 12, 9, 6, 3, 2, 0],
       "bucket_pct": [0.0, 0.0, 2.7, 10.8, 32.4, 24.3, 16.2, 8.1, 5.4, 0.0],
+      "min_samples": 50,
+      "samples_needed": 13,
       "recommendation": {
         "severity": "warn",
         "text": "Low average confidence; collect and label more images for this class."
@@ -330,6 +332,8 @@ Confidence values are percentages (0-100). The histogram divides confidence into
 | `classes[].max` | number | Highest recorded confidence percentage |
 | `classes[].buckets` | array | 10 raw counts, one per 10-point confidence band |
 | `classes[].bucket_pct` | array | The same distribution as percentages of `count` |
+| `classes[].min_samples` | number | Sample count required before a determination is made (currently 50) |
+| `classes[].samples_needed` | number | Remaining samples to reach `min_samples` (0 once reached) |
 | `classes[].recommendation.severity` | string | `none`, `info`, `warn`, or `ok` |
 | `classes[].recommendation.text` | string | Suggested action for this class |
 | `advice` | array | Text recommendations for classes flagged `warn` or `info` |

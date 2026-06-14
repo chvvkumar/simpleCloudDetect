@@ -177,6 +177,8 @@ class ConfidenceStats:
                     "max": e["max_conf"] if e["max_conf"] is not None else 0.0,
                     "buckets": list(e["buckets"]),
                     "bucket_pct": bucket_pct,
+                    "min_samples": MIN_SAMPLES,
+                    "samples_needed": max(0, MIN_SAMPLES - count),
                     "recommendation": rec,
                 })
                 if rec["severity"] in ("warn", "info"):
@@ -194,11 +196,16 @@ class ConfidenceStats:
     def _recommend(count: int, mean: float, buckets: list) -> dict:
         """First matching condition wins."""
         if count == 0:
-            return {"severity": "none", "text": "Not yet observed."}
+            return {
+                "severity": "none",
+                "text": f"Not yet observed; {MIN_SAMPLES} samples needed before a determination can be made.",
+            }
         if count < MIN_SAMPLES:
+            remaining = MIN_SAMPLES - count
+            sample_word = "sample" if remaining == 1 else "samples"
             return {
                 "severity": "info",
-                "text": "Too few samples to judge; needs more observations.",
+                "text": f"Too few samples to judge; {remaining} more {sample_word} needed before a determination can be made.",
             }
         if mean < LOW_MEAN_PCT:
             return {

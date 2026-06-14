@@ -1771,6 +1771,8 @@
                                 var color = ciSeverityColor(sev);
                                 var hasData = count > 0;
                                 var meanWidth = hasData ? Math.max(0, Math.min(100, mean)) : 0;
+                                var minSamples = (cls && typeof cls.min_samples === 'number') ? cls.min_samples : 0;
+                                var needed = (cls && typeof cls.samples_needed === 'number') ? cls.samples_needed : 0;
 
                                 var wrap = document.createElement('div');
                                 wrap.style.cssText = 'padding: 10px 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);';
@@ -1814,6 +1816,19 @@
                                 countEl.textContent = '(' + count + ')';
                                 summary.appendChild(countEl);
 
+                                var detEl = document.createElement('div');
+                                detEl.style.cssText = 'min-width: 64px; text-align: right; font-size: 10px; font-weight: 600; font-family: \'JetBrains Mono\', monospace;';
+                                if (needed > 0) {
+                                    detEl.textContent = needed + ' to go';
+                                    detEl.style.color = 'rgb(251, 191, 36)';
+                                    detEl.title = 'Needs ' + needed + ' more sample(s) to reach ' + minSamples + ' before a determination can be made';
+                                } else {
+                                    detEl.textContent = '✓ ready';
+                                    detEl.style.color = 'rgb(52, 211, 153)';
+                                    detEl.title = 'Reached ' + minSamples + ' samples; a determination can be made';
+                                }
+                                summary.appendChild(detEl);
+
                                 wrap.appendChild(summary);
 
                                 if (rec.text) {
@@ -1826,6 +1841,23 @@
                                 var detail = document.createElement('div');
                                 detail.id = 'ci-detail-' + idx;
                                 detail.style.cssText = 'display: none; margin-top: 12px; margin-left: 16px;';
+
+                                // Determination progress toward the minimum sample count.
+                                var detWrap = document.createElement('div');
+                                detWrap.style.cssText = 'margin-bottom: 12px;';
+                                var detLbl = document.createElement('div');
+                                detLbl.style.cssText = 'font-size: 11px; color: rgb(148, 163, 184); margin-bottom: 4px; font-family: \'JetBrains Mono\', monospace;';
+                                detLbl.textContent = 'Samples toward determination: ' + Math.min(count, minSamples) + ' / ' + minSamples +
+                                    (needed > 0 ? '  (' + needed + ' more needed)' : '  (reached)');
+                                var detTrack = document.createElement('div');
+                                detTrack.style.cssText = 'height: 12px; background: rgba(30, 41, 59, 0.6); border-radius: 2px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);';
+                                var detFill = document.createElement('div');
+                                var detPct = minSamples > 0 ? Math.max(0, Math.min(100, (count / minSamples) * 100)) : 100;
+                                detFill.style.cssText = 'height: 100%; width: ' + detPct + '%; background: ' + (needed > 0 ? 'rgb(251, 191, 36)' : 'rgb(52, 211, 153)') + '; opacity: 0.75;';
+                                detTrack.appendChild(detFill);
+                                detWrap.appendChild(detLbl);
+                                detWrap.appendChild(detTrack);
+                                detail.appendChild(detWrap);
 
                                 if (hasData) {
                                     var stats = document.createElement('div');

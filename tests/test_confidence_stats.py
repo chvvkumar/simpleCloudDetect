@@ -121,6 +121,26 @@ def test_recommendation_too_few_samples(stats):
     assert rain["recommendation"]["severity"] == "info"
 
 
+def test_samples_needed_counts_down_to_zero(stats):
+    # Unobserved class needs the full MIN_SAMPLES.
+    clear = next(c for c in stats.summary()["classes"] if c["name"] == "Clear")
+    assert clear["min_samples"] == MIN_SAMPLES
+    assert clear["samples_needed"] == MIN_SAMPLES
+
+    # After some samples, the remaining count decreases.
+    for _ in range(10):
+        stats.record("Rain", 50.0)
+    rain = next(c for c in stats.summary()["classes"] if c["name"] == "Rain")
+    assert rain["samples_needed"] == MIN_SAMPLES - 10
+    assert str(MIN_SAMPLES - 10) in rain["recommendation"]["text"]
+
+    # Once the threshold is reached, no more samples are needed.
+    for _ in range(MIN_SAMPLES):
+        stats.record("Snow", 95.0)
+    snow = next(c for c in stats.summary()["classes"] if c["name"] == "Snow")
+    assert snow["samples_needed"] == 0
+
+
 def test_recommendation_healthy(stats):
     for _ in range(MIN_SAMPLES + 10):
         stats.record("Clear", 95.0)
