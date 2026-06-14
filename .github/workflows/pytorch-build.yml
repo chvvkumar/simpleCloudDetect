@@ -10,7 +10,11 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    # Pin to the ARM64 runner (gitpi01). arm64 is the native build (the deploy
+    # target is an ARM64 Pi); amd64 is produced via QEMU emulation. The runner
+    # user there (pi) was added to the docker group so the QEMU/build steps can
+    # reach the docker socket.
+    runs-on: [self-hosted, Linux, ARM64]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
