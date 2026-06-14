@@ -134,3 +134,20 @@ def get_image():
         return Response(monitor.latest_image_bytes, mimetype='image/jpeg')
     else:
         return jsonify({"error": "No image available"}), 404
+
+@external_api_bp.route('/api/ext/v1/confidence-stats', methods=['GET'])
+def get_confidence_stats():
+    """Get per-class confidence statistics and model-tuning recommendations"""
+    if not monitor:
+        return jsonify({"error": "System not initialized"}), 503
+
+    return jsonify(monitor.confidence_stats.summary())
+
+@external_api_bp.route('/api/ext/v1/confidence-stats/reset', methods=['POST'])
+def reset_confidence_stats():
+    """Reset per-class confidence statistics and restart the observation window"""
+    if not monitor:
+        return jsonify({"error": "System not initialized"}), 503
+
+    monitor.confidence_stats.reset()
+    return jsonify(monitor.confidence_stats.summary())

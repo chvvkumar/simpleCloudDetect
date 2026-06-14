@@ -1602,6 +1602,279 @@
                                 
                                 <button type="submit">💾 Save Configuration</button>
                             </form>
+
+                            <!-- Model Confidence Insights (outside the config form) -->
+                            <div style="margin-top: 24px;">
+                                <button type="button" class="collapsible-btn" onclick="ciToggle('ci-content')">
+                                    <span><span class="icon">📊</span> Model Confidence Insights</span>
+                                    <span class="arrow">▼</span>
+                                </button>
+                                <div id="ci-content" class="collapsible-content">
+                                    <div class="collapsible-inner">
+                                        <p class="help-text" style="margin-bottom: 16px;">
+                                            This panel summarizes how confident the model is across each weather class. Low average confidence or low sample counts indicate classes where the model is uncertain or under-observed. Use it to decide which conditions need more captured and labeled training data.
+                                        </p>
+                                        <div id="ci-body" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(71, 85, 105, 0.5); border-radius: 8px; padding: 16px;">
+                                            <div id="ci-status" style="color: rgb(148, 163, 184); font-size: 13px;">Expand to load statistics.</div>
+                                            <div id="ci-header" style="display: none; margin-bottom: 16px; color: rgb(148, 163, 184); font-size: 12px;"></div>
+                                            <div id="ci-controls" style="display: none; gap: 10px; margin-bottom: 16px;">
+                                                <button type="button" id="ci-refresh" onclick="ciLoad()" style="padding: 6px 14px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgb(6, 182, 212); border-radius: 6px; color: rgb(6, 182, 212); font-size: 12px; font-weight: 600; cursor: pointer;">↻ Refresh</button>
+                                                <button type="button" id="ci-reset" onclick="ciReset()" style="padding: 6px 14px; background: rgba(248, 113, 113, 0.12); border: 1px solid rgb(248, 113, 113); border-radius: 6px; color: rgb(248, 113, 113); font-size: 12px; font-weight: 600; cursor: pointer;">⟲ Reset Statistics</button>
+                                            </div>
+                                            <div id="ci-classes"></div>
+                                            <div id="ci-advice" style="margin-top: 16px;"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <script>
+                            var ciLoaded = false;
+
+                            function ciToggle(id) {
+                                var content = document.getElementById(id);
+                                var btn = content.previousElementSibling;
+                                if (content.classList.contains('open')) {
+                                    content.classList.remove('open');
+                                    btn.classList.remove('active');
+                                } else {
+                                    content.classList.add('open');
+                                    btn.classList.add('active');
+                                    if (!ciLoaded) {
+                                        ciLoaded = true;
+                                        ciLoad();
+                                    }
+                                }
+                            }
+
+                            function ciSeverityColor(sev) {
+                                if (sev === 'ok') return 'rgb(52, 211, 153)';
+                                if (sev === 'warn') return 'rgb(248, 113, 113)';
+                                if (sev === 'info') return 'rgb(251, 191, 36)';
+                                return 'rgb(100, 116, 139)';
+                            }
+
+                            function ciFmtNum(n) {
+                                if (typeof n !== 'number' || isNaN(n)) return '-';
+                                return (Math.round(n * 10) / 10).toFixed(1);
+                            }
+
+                            function ciSetStatus(msg, color) {
+                                var s = document.getElementById('ci-status');
+                                s.style.display = msg ? 'block' : 'none';
+                                s.textContent = msg || '';
+                                s.style.color = color || 'rgb(148, 163, 184)';
+                            }
+
+                            function ciLoad() {
+                                ciSetStatus('Loading statistics...', 'rgb(148, 163, 184)');
+                                fetch('/api/ext/v1/confidence-stats')
+                                    .then(function(r) {
+                                        if (!r.ok) throw new Error('bad status');
+                                        return r.json();
+                                    })
+                                    .then(function(data) { ciRender(data); })
+                                    .catch(function() {
+                                        ciSetStatus('Could not load stats', 'rgb(248, 113, 113)');
+                                        document.getElementById('ci-header').style.display = 'none';
+                                        document.getElementById('ci-controls').style.display = 'none';
+                                        document.getElementById('ci-classes').innerHTML = '';
+                                        document.getElementById('ci-advice').innerHTML = '';
+                                    });
+                            }
+
+                            function ciReset() {
+                                if (!confirm('Reset all confidence statistics? This cannot be undone. Use this when testing a new model.')) return;
+                                ciSetStatus('Resetting...', 'rgb(148, 163, 184)');
+                                fetch('/api/ext/v1/confidence-stats/reset', { method: 'POST' })
+                                    .then(function(r) {
+                                        if (!r.ok) throw new Error('bad status');
+                                        return r.json();
+                                    })
+                                    .then(function(data) { ciRender(data); })
+                                    .catch(function() {
+                                        ciSetStatus('Could not load stats', 'rgb(248, 113, 113)');
+                                    });
+                            }
+
+                            function ciBandLabel(i) {
+                                return (i * 10) + '-' + ((i + 1) * 10);
+                            }
+
+                            function ciRender(data) {
+                                ciSetStatus('', null);
+                                var header = document.getElementById('ci-header');
+                                var controls = document.getElementById('ci-controls');
+                                var classesEl = document.getElementById('ci-classes');
+                                var adviceEl = document.getElementById('ci-advice');
+
+                                var total = (data && typeof data.total_detections === 'number') ? data.total_detections : 0;
+                                var sinceTxt = '-';
+                                if (data && data.since) {
+                                    var d = new Date(data.since);
+                                    if (!isNaN(d.getTime())) sinceTxt = d.toLocaleString();
+                                    else sinceTxt = String(data.since);
+                                }
+                                header.style.display = 'block';
+                                header.innerHTML = 'Total detections: <span style="color: rgb(226, 232, 240); font-family: \'JetBrains Mono\', monospace;">' + total + '</span> &nbsp;|&nbsp; Since: <span style="color: rgb(226, 232, 240);">' + ciEsc(sinceTxt) + '</span>';
+                                controls.style.display = 'flex';
+
+                                classesEl.innerHTML = '';
+                                var classes = (data && Array.isArray(data.classes)) ? data.classes : [];
+                                for (var ci = 0; ci < classes.length; ci++) {
+                                    classesEl.appendChild(ciBuildClassRow(classes[ci], ci));
+                                }
+
+                                adviceEl.innerHTML = '';
+                                var adviceTitle = document.createElement('div');
+                                adviceTitle.textContent = 'Recommendations';
+                                adviceTitle.style.cssText = 'color: rgb(6, 182, 212); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; border-top: 1px solid rgba(71, 85, 105, 0.5); padding-top: 14px;';
+                                adviceEl.appendChild(adviceTitle);
+
+                                var advice = (data && Array.isArray(data.advice)) ? data.advice : [];
+                                if (advice.length === 0) {
+                                    var ok = document.createElement('div');
+                                    ok.textContent = 'All classes look healthy. Keep collecting data.';
+                                    ok.style.cssText = 'color: rgb(52, 211, 153); font-size: 13px;';
+                                    adviceEl.appendChild(ok);
+                                } else {
+                                    var ul = document.createElement('ul');
+                                    ul.style.cssText = 'list-style: none; margin: 0; padding: 0;';
+                                    for (var ai = 0; ai < advice.length; ai++) {
+                                        var li = document.createElement('li');
+                                        li.style.cssText = 'display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; color: rgb(226, 232, 240); font-size: 13px;';
+                                        var marker = document.createElement('span');
+                                        marker.textContent = '●';
+                                        marker.style.cssText = 'color: rgb(251, 191, 36); line-height: 1.4;';
+                                        var txt = document.createElement('span');
+                                        txt.textContent = advice[ai];
+                                        li.appendChild(marker);
+                                        li.appendChild(txt);
+                                        ul.appendChild(li);
+                                    }
+                                    adviceEl.appendChild(ul);
+                                }
+                            }
+
+                            function ciEsc(s) {
+                                var d = document.createElement('div');
+                                d.textContent = s == null ? '' : String(s);
+                                return d.innerHTML;
+                            }
+
+                            function ciBuildClassRow(cls, idx) {
+                                var name = cls && cls.name ? cls.name : 'Class';
+                                var count = (cls && typeof cls.count === 'number') ? cls.count : 0;
+                                var mean = (cls && typeof cls.mean === 'number') ? cls.mean : 0;
+                                var rec = (cls && cls.recommendation) ? cls.recommendation : { severity: 'none', text: '' };
+                                var sev = rec.severity || 'none';
+                                var color = ciSeverityColor(sev);
+                                var hasData = count > 0;
+                                var meanWidth = hasData ? Math.max(0, Math.min(100, mean)) : 0;
+
+                                var wrap = document.createElement('div');
+                                wrap.style.cssText = 'padding: 10px 12px; background: rgba(30, 41, 59, 0.4); border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(71, 85, 105, 0.5);';
+
+                                var summary = document.createElement('div');
+                                summary.style.cssText = 'display: flex; align-items: center; gap: 12px; cursor: pointer;';
+
+                                var nameWrap = document.createElement('div');
+                                nameWrap.style.cssText = 'min-width: 110px; display: flex; align-items: center; gap: 6px;';
+                                var arrow = document.createElement('span');
+                                arrow.textContent = '▸';
+                                arrow.style.cssText = 'color: rgb(148, 163, 184); font-size: 10px; transition: transform 0.2s ease;';
+                                var nameEl = document.createElement('span');
+                                nameEl.textContent = name;
+                                nameEl.style.cssText = 'font-weight: 600; color: rgb(226, 232, 240); font-size: 13px;';
+                                nameWrap.appendChild(arrow);
+                                nameWrap.appendChild(nameEl);
+                                if (sev === 'warn' || sev === 'info') {
+                                    var badge = document.createElement('span');
+                                    badge.textContent = '⚠';
+                                    badge.title = rec.text || '';
+                                    badge.style.cssText = 'color: ' + color + '; font-size: 12px;';
+                                    nameWrap.appendChild(badge);
+                                }
+                                summary.appendChild(nameWrap);
+
+                                var track = document.createElement('div');
+                                track.style.cssText = 'flex: 1; position: relative; height: 18px; background: rgba(30, 41, 59, 0.6); border-radius: 3px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);';
+                                var fill = document.createElement('div');
+                                fill.style.cssText = 'position: absolute; left: 0; top: 0; bottom: 0; width: ' + meanWidth + '%; background: ' + color + '; opacity: 0.75; transition: width 0.2s ease;';
+                                track.appendChild(fill);
+                                summary.appendChild(track);
+
+                                var meanEl = document.createElement('div');
+                                meanEl.style.cssText = 'min-width: 52px; text-align: right; font-size: 12px; color: rgb(226, 232, 240); font-family: \'JetBrains Mono\', monospace;';
+                                meanEl.textContent = hasData ? (ciFmtNum(mean) + '%') : 'no data';
+                                summary.appendChild(meanEl);
+
+                                var countEl = document.createElement('div');
+                                countEl.style.cssText = 'min-width: 44px; text-align: right; font-size: 11px; color: rgb(148, 163, 184); font-family: \'JetBrains Mono\', monospace;';
+                                countEl.textContent = '(' + count + ')';
+                                summary.appendChild(countEl);
+
+                                wrap.appendChild(summary);
+
+                                if (rec.text) {
+                                    var recEl = document.createElement('div');
+                                    recEl.textContent = rec.text;
+                                    recEl.style.cssText = 'margin-top: 6px; margin-left: 16px; font-size: 11px; color: ' + color + ';';
+                                    wrap.appendChild(recEl);
+                                }
+
+                                var detail = document.createElement('div');
+                                detail.id = 'ci-detail-' + idx;
+                                detail.style.cssText = 'display: none; margin-top: 12px; margin-left: 16px;';
+
+                                if (hasData) {
+                                    var stats = document.createElement('div');
+                                    stats.style.cssText = 'font-size: 11px; color: rgb(148, 163, 184); margin-bottom: 10px; font-family: \'JetBrains Mono\', monospace;';
+                                    stats.textContent = 'min ' + ciFmtNum(cls.min) + '%  /  mean ' + ciFmtNum(cls.mean) + '%  /  max ' + ciFmtNum(cls.max) + '%';
+                                    detail.appendChild(stats);
+
+                                    var buckets = (cls && Array.isArray(cls.buckets)) ? cls.buckets : [];
+                                    var pcts = (cls && Array.isArray(cls.bucket_pct)) ? cls.bucket_pct : [];
+                                    for (var bi = 0; bi < 10; bi++) {
+                                        var bcount = (typeof buckets[bi] === 'number') ? buckets[bi] : 0;
+                                        var bpct = (typeof pcts[bi] === 'number') ? pcts[bi] : 0;
+                                        var bw = Math.max(0, Math.min(100, bpct));
+                                        var row = document.createElement('div');
+                                        row.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 4px;';
+                                        var lbl = document.createElement('span');
+                                        lbl.textContent = ciBandLabel(bi);
+                                        lbl.style.cssText = 'min-width: 48px; font-size: 10px; color: rgb(148, 163, 184); font-family: \'JetBrains Mono\', monospace; text-align: right;';
+                                        var btrack = document.createElement('div');
+                                        btrack.style.cssText = 'flex: 1; height: 12px; background: rgba(30, 41, 59, 0.6); border-radius: 2px; overflow: hidden; border: 1px solid rgba(71, 85, 105, 0.5);';
+                                        var bfill = document.createElement('div');
+                                        bfill.style.cssText = 'height: 100%; width: ' + bw + '%; background: rgb(6, 182, 212); opacity: 0.7;';
+                                        btrack.appendChild(bfill);
+                                        var bc = document.createElement('span');
+                                        bc.textContent = bcount;
+                                        bc.style.cssText = 'min-width: 32px; font-size: 10px; color: rgb(226, 232, 240); font-family: \'JetBrains Mono\', monospace; text-align: right;';
+                                        row.appendChild(lbl);
+                                        row.appendChild(btrack);
+                                        row.appendChild(bc);
+                                        detail.appendChild(row);
+                                    }
+                                } else {
+                                    var nd = document.createElement('div');
+                                    nd.textContent = 'No samples observed yet for this class.';
+                                    nd.style.cssText = 'font-size: 11px; color: rgb(148, 163, 184);';
+                                    detail.appendChild(nd);
+                                }
+
+                                wrap.appendChild(detail);
+
+                                summary.addEventListener('click', function() {
+                                    var open = detail.style.display !== 'none';
+                                    detail.style.display = open ? 'none' : 'block';
+                                    arrow.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
+                                });
+
+                                return wrap;
+                            }
+                            </script>
                 </div>
             </div>
         </div>

@@ -16,6 +16,8 @@ Complete reference for the SimpleCloudDetect External REST API - a flexible inte
   - [Connected Clients](#connected-clients)
   - [Safety History](#safety-history)
   - [Latest Image](#latest-image)
+  - [Confidence Statistics](#confidence-statistics)
+  - [Reset Confidence Statistics](#reset-confidence-statistics)
 - [Response Formats](#response-formats)
 - [Error Handling](#error-handling)
 - [Usage Examples](#usage-examples)
@@ -24,7 +26,7 @@ Complete reference for the SimpleCloudDetect External REST API - a flexible inte
 
 ## Overview
 
-The External REST API provides read-only access to SimpleCloudDetect's internal state, separate from the strict ASCOM Alpaca API. This API is designed for:
+The External REST API provides access to SimpleCloudDetect's internal state, separate from the strict ASCOM Alpaca API. All endpoints are read-only except `POST /api/ext/v1/confidence-stats/reset`, which clears the confidence statistics. This API is designed for:
 
 - **Dashboards** - Build custom monitoring interfaces
 - **Home Automation** - Integrate with non-MQTT systems
@@ -275,6 +277,107 @@ If no image is available:
 ```
 
 **Status Code**: 404
+
+---
+
+### Confidence Statistics
+
+**GET** `/api/ext/v1/confidence-stats`
+
+Returns aggregated per-class prediction confidence collected since the last reset, plus model-tuning recommendations. Use this data to identify classes where the model is uncertain or under-observed and prioritize collecting and labeling more training images for them.
+
+Confidence values are percentages (0-100). The histogram divides confidence into 10 fixed bins of 10 percentage points each, covering `0-10`, `10-20`, ... `90-100`. `bucket_pct` holds the same distribution expressed as a percentage of that class's sample count.
+
+#### Response
+
+```json
+{
+  "version": 1,
+  "since": "2026-06-14T12:00:00+00:00",
+  "total_detections": 1234,
+  "classes": [
+    {
+      "name": "Rain",
+      "count": 37,
+      "mean": 41.0,
+      "min": 28.4,
+      "max": 71.2,
+      "buckets": [0, 0, 1, 4, 12, 9, 6, 3, 2, 0],
+      "bucket_pct": [0.0, 0.0, 2.7, 10.8, 32.4, 24.3, 16.2, 8.1, 5.4, 0.0],
+      "recommendation": {
+        "severity": "warn",
+        "text": "Low average confidence; collect and label more images for this class."
+      }
+    }
+  ],
+  "advice": [
+    "Rain: Low average confidence; collect and label more images for this class."
+  ]
+}
+```
+
+#### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | number | Stats schema version |
+| `since` | string | Start of the current observation window (ISO 8601, UTC) |
+| `total_detections` | number | Total predictions recorded since the last reset |
+| `classes[].name` | string | Class label |
+| `classes[].count` | number | Predictions recorded for this class |
+| `classes[].mean` | number | Mean confidence percentage (0 when no samples) |
+| `classes[].min` | number | Lowest recorded confidence percentage |
+| `classes[].max` | number | Highest recorded confidence percentage |
+| `classes[].buckets` | array | 10 raw counts, one per 10-point confidence band |
+| `classes[].bucket_pct` | array | The same distribution as percentages of `count` |
+| `classes[].recommendation.severity` | string | `none`, `info`, `warn`, or `ok` |
+| `classes[].recommendation.text` | string | Suggested action for this class |
+| `advice` | array | Text recommendations for classes flagged `warn` or `info` |
+
+#### Recommendation Severity
+
+| Severity | Condition | Meaning |
+|----------|-----------|---------|
+| `none` | `count == 0` | Class not yet observed |
+| `info` | `count < 50` | Too few samples to judge; needs more observations |
+| `warn` | `mean < 60` | Low average confidence; collect and label more images |
+| `warn` | Over 30% of predictions fall in the 40-60% bins | Many borderline predictions; good candidates to label |
+| `ok` | None of the above | Healthy confidence and sample count |
+
+---
+
+### Reset Confidence Statistics
+
+**POST** `/api/ext/v1/confidence-stats/reset`
+
+Clears all aggregated confidence statistics and restarts the observation window (`since` is set to the current time, counts return to zero). Known class labels are retained with zeroed counts. Use this when swapping in a new model so the statistics reflect only the new model's behavior.
+
+#### Response
+
+Returns the same structure as `GET /api/ext/v1/confidence-stats`, now empty:
+
+```json
+{
+  "version": 1,
+  "since": "2026-06-14T18:45:00+00:00",
+  "total_detections": 0,
+  "classes": [
+    {
+      "name": "Rain",
+      "count": 0,
+      "mean": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "buckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "bucket_pct": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "recommendation": { "severity": "none", "text": "Not yet observed." }
+    }
+  ],
+  "advice": []
+}
+```
+
+**Status Code**: 200
 
 ---
 

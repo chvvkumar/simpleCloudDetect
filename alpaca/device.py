@@ -16,6 +16,7 @@ CLIENT_TIMEOUT_SECONDS = 300  # 5 Minutes
 
 # Import from sibling modules
 from .config import AlpacaConfig, get_current_time, ALL_CLOUD_CONDITIONS
+from .confidence_stats import ConfidenceStats
 # Assuming detect.py is in the root path or installed as a package
 from detect import CloudDetector, Config as DetectConfig, HADiscoveryManager
 
@@ -67,7 +68,9 @@ class AlpacaSafetyMonitor:
         self.detection_lock = threading.Lock()
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
-        
+
+        self.confidence_stats = ConfidenceStats(classes=ALL_CLOUD_CONDITIONS)
+
         # Setup MQTT client first
         self.mqtt_client = self._setup_mqtt()
         self.ha_discovery = None
@@ -259,7 +262,10 @@ class AlpacaSafetyMonitor:
                         'condition': result.get('class_name', 'Unknown'),
                         'confidence': result.get('confidence_score', 0.0)
                     })
-            
+
+            # Record per-class confidence for model-tuning insights
+            self.confidence_stats.record(result.get('class_name', ''), result.get('confidence_score', 0.0))
+
             # MQTT Publish
             if self.mqtt_client:
                 try:
