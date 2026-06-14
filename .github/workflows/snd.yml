@@ -56,3 +56,44 @@ jobs:
           docker pull ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:pytorch
           IMAGE_SIZE=$(docker images --format "{{.Size}}" ${{ vars.DOCKERHUB_USERNAME }}/simpleclouddetect:pytorch | head -n1)
           echo "Docker image size: $IMAGE_SIZE"
+
+      # Retain only the 2 newest pytorch-<sha> tags (current + one previous).
+      # The rolling 'pytorch' tag is never touched.
+      - name: Prune old pytorch-<sha> tags on Docker Hub
+        env:
+          NAMESPACE: ${{ vars.DOCKERHUB_USERNAME }}
+          REPO: simpleclouddetect
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          KEEP: 2
+        run: |
+          set -euo pipefail
+
+          JWT=$(curl -sf -H "Content-Type: application/json" -X POST \
+            -d "{\"username\": \"${NAMESPACE}\", \"password\": \"${DOCKERHUB_TOKEN}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+
+          if [ -z "${JWT}" ] || [ "${JWT}" = "null" ]; then
+            echo "Failed to authenticate to Docker Hub" >&2
+            exit 1
+          fi
+
+          # All pytorch-<sha> tags, newest first, dropping the KEEP most recent.
+          OLD_TAGS=$(curl -sf -H "Authorization: JWT ${JWT}" \
+            "https://hub.docker.com/v2/repositories/${NAMESPACE}/${REPO}/tags/?page_size=100" \
+            | jq -r --argjson keep "${KEEP}" \
+                '.results
+                 | map(select(.name | startswith("pytorch-")))
+                 | sort_by(.last_updated) | reverse
+                 | .[$keep:]
+                 | .[].name')
+
+          if [ -z "${OLD_TAGS}" ]; then
+            echo "No old pytorch-<sha> tags to prune."
+            exit 0
+          fi
+
+          for TAG in ${OLD_TAGS}; do
+            echo "Deleting old tag: ${TAG}"
+            curl -sf -X DELETE -H "Authorization: JWT ${JWT}" \
+              "https://hub.docker.com/v2/repositories/${NAMESPACE}/${REPO}/tags/${TAG}/"
+          done
