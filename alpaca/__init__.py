@@ -38,7 +38,12 @@ def create_app():
     alpaca_cfg.save_to_file()
     
     detect_cfg = DetectConfig.from_env()
-    
+
+    # Apply resolved connection overrides: env vars are defaults, filled-in
+    # UI (AlpacaConfig) values win.
+    for k, v in alpaca_cfg.resolve_detect_overrides().items():
+        setattr(detect_cfg, k, v)
+
     # Sync detect_config interval with alpaca_config
     detect_cfg.detect_interval = alpaca_cfg.detection_interval
     

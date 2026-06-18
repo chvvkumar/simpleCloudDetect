@@ -229,6 +229,76 @@ class AlpacaSafetyMonitor:
             logger.error(f"Failed to connect to MQTT broker: {e}")
             return None
     
+    def apply_runtime_settings(self):
+        """Apply UI-edited connection settings live without a restart.
+
+        Resolves the effective detect-layer overrides, mutates self.detect_config
+        in place, tears down the current MQTT client, rebuilds it, and re-inits HA
+        discovery. Never raises: any failure is logged and leaves MQTT disabled so
+        the background detection loop keeps running.
+        """
+        try:
+            overrides = self.alpaca_config.resolve_detect_overrides()
+
+            # Capture the existing (pre-mutation) HA availability identity so we can
+            # publish "offline" under the OLD topic before swapping in new settings.
+            old_mode = self.detect_config.mqtt_discovery_mode
+            old_availability_topic = (
+                f"{self.detect_config.mqtt_discovery_prefix}"
+                f"/sensor/clouddetect_{self.detect_config.device_id}/availability"
+            )
+
+            # Mutate detect_config in place. The image_url change is picked up
+            # automatically by the next detect() call (reads self.config.image_url).
+            for key in (
+                'broker', 'port', 'mqtt_username', 'mqtt_password',
+                'mqtt_discovery_mode', 'mqtt_discovery_prefix',
+                'device_id', 'device_name', 'image_url', 'verify_ssl',
+            ):
+                if key in overrides:
+                    setattr(self.detect_config, key, overrides[key])
+
+            # Tear down the existing MQTT client safely.
+            old_client = getattr(self, 'mqtt_client', None)
+            if old_client is not None:
+                try:
+                    if old_mode == 'homeassistant':
+                        old_client.publish(old_availability_topic, "offline", retain=True)
+                    old_client.loop_stop()
+                    old_client.disconnect()
+                except Exception as e:
+                    logger.warning(f"Failed to tear down old MQTT client cleanly: {e}")
+
+            # Rebuild the MQTT client and propagate it to the detector.
+            self.mqtt_client = self._setup_mqtt()
+            self.cloud_detector.mqtt_client = self.mqtt_client
+
+            # Re-init HA discovery for the new mode/client.
+            if (self.detect_config.mqtt_discovery_mode == 'homeassistant'
+                    and self.mqtt_client is not None):
+                self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client)
+                self.ha_discovery.publish_discovery_configs()
+            else:
+                self.ha_discovery = None
+
+            logger.info(
+                "Applied runtime settings: image_url=%s broker=%s:%s mode=%s mqtt=%s",
+                self.detect_config.image_url,
+                self.detect_config.broker,
+                self.detect_config.port,
+                self.detect_config.mqtt_discovery_mode,
+                "connected" if self.mqtt_client else "disabled",
+            )
+        except Exception as e:
+            logger.error(f"Failed to apply runtime settings, MQTT left disabled: {e}")
+            self.mqtt_client = None
+            self.ha_discovery = None
+            try:
+                if getattr(self, 'cloud_detector', None) is not None:
+                    self.cloud_detector.mqtt_client = None
+            except Exception:
+                pass
+
     def _run_single_detection(self, initial: bool = False):
         """Run a single detection cycle with optimized image handling"""
         try:

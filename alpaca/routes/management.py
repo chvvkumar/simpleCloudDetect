@@ -33,7 +33,16 @@ def setup_device(device_number: int):
             monitor.alpaca_config.image_url = request.form.get('image_url', monitor.alpaca_config.image_url)
             monitor.alpaca_config.ntp_server = request.form.get('ntp_server', monitor.alpaca_config.ntp_server)
             monitor.alpaca_config.timezone = request.form.get('timezone', monitor.alpaca_config.timezone)
-            
+
+            # Update connection & MQTT settings
+            monitor.alpaca_config.mqtt_broker = request.form.get('mqtt_broker', monitor.alpaca_config.mqtt_broker)
+            monitor.alpaca_config.mqtt_port = int(request.form.get('mqtt_port', monitor.alpaca_config.mqtt_port))
+            monitor.alpaca_config.mqtt_username = request.form.get('mqtt_username', monitor.alpaca_config.mqtt_username)
+            monitor.alpaca_config.mqtt_password = request.form.get('mqtt_password', monitor.alpaca_config.mqtt_password)
+            monitor.alpaca_config.mqtt_discovery_mode = request.form.get('mqtt_discovery_mode', monitor.alpaca_config.mqtt_discovery_mode)
+            monitor.alpaca_config.device_id = request.form.get('device_id', monitor.alpaca_config.device_id)
+            monitor.alpaca_config.verify_ssl = (request.form.get('verify_ssl') == 'on')
+
             # Update timing settings
             monitor.alpaca_config.detection_interval = int(request.form.get('detection_interval', monitor.alpaca_config.detection_interval))
             monitor.alpaca_config.update_interval = int(request.form.get('update_interval', monitor.alpaca_config.update_interval))
@@ -59,6 +68,9 @@ def setup_device(device_number: int):
             
             # Save configuration
             monitor.alpaca_config.save_to_file()
+
+            # Apply connection/MQTT changes live (rebuilds MQTT, never raises)
+            monitor.apply_runtime_settings()
             message = "Configuration saved successfully!"
             
         except Exception as e:
@@ -227,6 +239,17 @@ def setup_device(device_number: int):
         current_location=monitor.alpaca_config.location,
         current_image_url=monitor.alpaca_config.image_url,
         image_url_default=os.environ.get('IMAGE_URL', ''),
+        current_mqtt_broker=monitor.alpaca_config.mqtt_broker,
+        mqtt_broker_default=os.environ.get('MQTT_BROKER', ''),
+        current_mqtt_port=monitor.alpaca_config.mqtt_port,
+        mqtt_port_default=os.environ.get('MQTT_PORT', '1883'),
+        current_mqtt_username=monitor.alpaca_config.mqtt_username,
+        mqtt_username_default=os.environ.get('MQTT_USERNAME', ''),
+        current_mqtt_password=monitor.alpaca_config.mqtt_password,
+        current_mqtt_discovery_mode=monitor.alpaca_config.mqtt_discovery_mode,
+        current_device_id=monitor.alpaca_config.device_id,
+        device_id_default=os.environ.get('DEVICE_ID', ''),
+        current_verify_ssl=monitor.alpaca_config.verify_ssl,
         current_ntp_server=monitor.alpaca_config.ntp_server,
         current_timezone=monitor.alpaca_config.timezone,
         detection_interval=monitor.alpaca_config.detection_interval,

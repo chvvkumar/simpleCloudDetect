@@ -83,7 +83,35 @@ class AlpacaConfig:
     # NTP and timezone settings
     ntp_server: str = field(default_factory=lambda: os.environ.get('NTP_SERVER', 'pool.ntp.org'))
     timezone: str = field(default_factory=lambda: os.environ.get('TZ', 'UTC'))
-    
+
+    # Connection / MQTT settings (env vars are defaults, UI values override)
+    mqtt_broker: str = field(default_factory=lambda: os.environ.get('MQTT_BROKER', ''))
+    mqtt_port: int = field(default_factory=lambda: int(os.environ.get('MQTT_PORT') or 1883))
+    mqtt_username: str = field(default_factory=lambda: os.environ.get('MQTT_USERNAME', ''))
+    mqtt_password: str = field(default_factory=lambda: os.environ.get('MQTT_PASSWORD', ''))
+    mqtt_discovery_mode: str = field(default_factory=lambda: os.environ.get('MQTT_DISCOVERY_MODE', 'legacy'))
+    mqtt_discovery_prefix: str = field(default_factory=lambda: os.environ.get('MQTT_DISCOVERY_PREFIX', 'homeassistant'))
+    device_id: str = field(default_factory=lambda: os.environ.get('DEVICE_ID', ''))
+    verify_ssl: bool = field(default_factory=lambda: os.environ.get('VERIFY_SSL', 'false').lower() == 'true')
+
+    def resolve_detect_overrides(self) -> dict:
+        """Effective detect.py settings: UI value if filled in, else env default."""
+        def pick(ui_val, env_var, default=''):
+            return ui_val if ui_val not in (None, '') else os.environ.get(env_var, default)
+        mode = (self.mqtt_discovery_mode or os.environ.get('MQTT_DISCOVERY_MODE', 'legacy')).lower()
+        return {
+            'image_url': pick(self.image_url, 'IMAGE_URL'),
+            'broker': pick(self.mqtt_broker, 'MQTT_BROKER') or None,
+            'port': int(self.mqtt_port or os.environ.get('MQTT_PORT') or 1883),
+            'mqtt_username': pick(self.mqtt_username, 'MQTT_USERNAME') or None,
+            'mqtt_password': pick(self.mqtt_password, 'MQTT_PASSWORD') or None,
+            'mqtt_discovery_mode': mode,
+            'mqtt_discovery_prefix': pick(self.mqtt_discovery_prefix, 'MQTT_DISCOVERY_PREFIX', 'homeassistant'),
+            'device_id': pick(self.device_id, 'DEVICE_ID') or None,
+            'device_name': pick(self.device_name, 'DEVICE_NAME', 'Cloud Detector'),
+            'verify_ssl': bool(self.verify_ssl),
+        }
+
     @classmethod
     def get_config_path(cls) -> str:
         """Get configuration file path from environment or default"""

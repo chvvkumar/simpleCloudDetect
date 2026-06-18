@@ -1170,7 +1170,105 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
+                                <!-- Connection & MQTT -->
+                                <div style="margin-bottom: 20px;">
+                                    <button type="button" class="collapsible-btn" onclick="toggleCollapsible('connection-settings')">
+                                        <span><span class="icon">🔌</span> Connection &amp; MQTT</span>
+                                        <span class="arrow">▼</span>
+                                    </button>
+                                    <div id="connection-settings" class="collapsible-content">
+                                        <div class="collapsible-inner">
+                                            <div class="input-group" style="margin: 0;">
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="mqtt_broker">MQTT Broker</label>
+                                                        <input type="text" id="mqtt_broker" name="mqtt_broker" class="glow-input"
+                                                               value="{{ current_mqtt_broker }}" placeholder="{{ mqtt_broker_default }}">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Leave empty to use the environment variable default.
+                                                        </small>
+                                                    </div>
+
+                                                    <div class="form-group">
+                                                        <label for="mqtt_port">MQTT Port</label>
+                                                        <input type="number" id="mqtt_port" name="mqtt_port" min="1" max="65535" step="1"
+                                                               value="{{ current_mqtt_port }}" placeholder="{{ mqtt_port_default }}"
+                                                               style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6);
+                                                                      border: 1px solid rgb(71, 85, 105); border-radius: 6px;
+                                                                      color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                                      transition: all 0.2s ease;">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Leave empty to use the environment variable default.
+                                                        </small>
+                                                    </div>
+                                                </div>
+
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="mqtt_username">MQTT Username</label>
+                                                        <input type="text" id="mqtt_username" name="mqtt_username" class="glow-input"
+                                                               value="{{ current_mqtt_username }}" placeholder="{{ mqtt_username_default }}">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Leave empty to use the environment variable default.
+                                                        </small>
+                                                    </div>
+
+                                                    <div class="form-group">
+                                                        <label for="mqtt_password">MQTT Password</label>
+                                                        <input type="password" id="mqtt_password" name="mqtt_password" class="glow-input"
+                                                               value="{{ current_mqtt_password }}" placeholder="Leave blank to inherit env">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Stored in the config file. Leave blank to inherit the environment variable.
+                                                        </small>
+                                                    </div>
+                                                </div>
+
+                                                <div class="input-row">
+                                                    <div class="form-group">
+                                                        <label for="mqtt_discovery_mode">MQTT Discovery Mode</label>
+                                                        <select id="mqtt_discovery_mode" name="mqtt_discovery_mode"
+                                                                style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6);
+                                                                       border: 1px solid rgb(71, 85, 105); border-radius: 6px;
+                                                                       color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                                       transition: all 0.2s ease;">
+                                                            <option value="legacy" {% if current_mqtt_discovery_mode == 'legacy' %}selected{% endif %}>legacy</option>
+                                                            <option value="homeassistant" {% if current_mqtt_discovery_mode == 'homeassistant' %}selected{% endif %}>homeassistant</option>
+                                                        </select>
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Home Assistant MQTT discovery mode.
+                                                        </small>
+                                                    </div>
+
+                                                    <div class="form-group">
+                                                        <label for="device_id">Device ID</label>
+                                                        <input type="text" id="device_id" name="device_id" class="glow-input"
+                                                               value="{{ current_device_id }}" placeholder="{{ device_id_default }}">
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Leave empty to use the environment variable default.
+                                                            Changing this re-registers Home Assistant discovery under the new ID.
+                                                        </small>
+                                                    </div>
+                                                </div>
+
+                                                <div class="input-row">
+                                                    <div class="form-group" style="grid-column: span 2;">
+                                                        <label for="verify_ssl">
+                                                            <input type="checkbox" id="verify_ssl" name="verify_ssl"
+                                                                   {% if current_verify_ssl %}checked{% endif %}
+                                                                   style="margin-right: 8px; vertical-align: middle;">
+                                                            Verify SSL Certificates
+                                                        </label>
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Verify TLS certificates when fetching the image URL.
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Timing Configuration -->
                                 <div style="margin-bottom: 20px;">
                                     <button type="button" class="collapsible-btn" onclick="toggleCollapsible('timing-config')">
