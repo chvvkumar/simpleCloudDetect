@@ -1139,12 +1139,24 @@
                                                     </div>
                                                 </div>
                                                 <div class="input-row">
-                                                    <div class="form-group" style="grid-column: span 2;">
+                                                    <div class="form-group">
                                                         <label for="image_url">Image Source URL</label>
                                                         <input type="text" id="image_url" name="image_url" class="glow-input"
                                                                value="{{ current_image_url }}" placeholder="{{ image_url_default }}">
                                                         <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
                                                             URL to fetch images for cloud detection. Leave empty to use environment variable default.
+                                                        </small>
+                                                    </div>
+
+                                                    <div class="form-group">
+                                                        <label for="verify_ssl">
+                                                            <input type="checkbox" id="verify_ssl" name="verify_ssl"
+                                                                   {% if current_verify_ssl %}checked{% endif %}
+                                                                   style="margin-right: 8px; vertical-align: middle;">
+                                                            Verify SSL Certificates
+                                                        </label>
+                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
+                                                            Verify TLS certificates when fetching the image URL.
                                                         </small>
                                                     </div>
                                                 </div>
@@ -1250,20 +1262,6 @@
                                                         <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
                                                             Leave empty to use the environment variable default.
                                                             Changing this re-registers Home Assistant discovery under the new ID.
-                                                        </small>
-                                                    </div>
-                                                </div>
-
-                                                <div class="input-row">
-                                                    <div class="form-group" style="grid-column: span 2;">
-                                                        <label for="verify_ssl">
-                                                            <input type="checkbox" id="verify_ssl" name="verify_ssl"
-                                                                   {% if current_verify_ssl %}checked{% endif %}
-                                                                   style="margin-right: 8px; vertical-align: middle;">
-                                                            Verify SSL Certificates
-                                                        </label>
-                                                        <small style="color: rgb(148, 163, 184); font-size: 12px; margin-top: 4px; display: block;">
-                                                            Verify TLS certificates when fetching the image URL.
                                                         </small>
                                                     </div>
                                                 </div>
