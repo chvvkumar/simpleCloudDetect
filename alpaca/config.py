@@ -61,7 +61,7 @@ class AlpacaConfig:
     """Configuration for the Alpaca server"""
     port: int = 11111
     device_number: int = 0
-    device_name: str = "SimpleCloudDetect"
+    device_name: str = ""
     device_description: str = "ASCOM SafetyMonitor based on ML cloud detection"
     driver_info: str = "ASCOM Alpaca SafetyMonitor v2.0 - Cloud Detection Driver"
     driver_version: str = "2.0"

@@ -127,7 +127,7 @@ class HADiscoveryManager:
         confidence_config = {
             "name": "Confidence",
             "unique_id": f"clouddetect_{self.device_id}_confidence",
-            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}_confidence/state",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/state",
             "availability_topic": self.availability_topic,
             "unit_of_measurement": "%",
             "icon": "mdi:percent",
@@ -143,7 +143,7 @@ class HADiscoveryManager:
         time_config = {
             "name": "Detection Time",
             "unique_id": f"clouddetect_{self.device_id}_detection_time",
-            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}_detection_time/state",
+            "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/state",
             "availability_topic": self.availability_topic,
             "unit_of_measurement": "s",
             "device_class": "duration",
