@@ -31,3 +31,8 @@ htmlcov/
 
 # Logs
 *.log
+
+# Agent tooling
+docs/superpowers/
+.claude/
+CLAUDE.md
