@@ -781,7 +781,7 @@
                                     <div class="detection-item">
                                         <div class="detection-label">
                                             Safety State
-                                            <span class="info-tooltip" data-tooltip="Debounced detector state, also served by the external API and MQTT. ASCOM clients receive this value only while connected.">ⓘ</span>
+                                            <span class="info-tooltip" data-tooltip="Debounced detector state, served identically by ASCOM Alpaca IsSafe, the external API and MQTT, whether or not any client is connected.">ⓘ</span>
                                         </div>
                                         <div class="detection-value" style="color: {{ ascom_safe_color }};">{{ ascom_safe_status }}</div>
                                     </div>

@@ -443,9 +443,9 @@ class AlpacaSafetyMonitor:
     def is_safe(self) -> bool:
         """Debounced safety state of the sky, independent of ASCOM client connections.
 
-        The Alpaca routes apply the per-client Connected gate themselves
-        (see routes/api.py client_is_safe). Everything else (external REST
-        API, dashboard, MQTT) reports this value directly.
+        Served as-is by the Alpaca IsSafe route, the external REST API, the
+        dashboard and MQTT. The ASCOM spec never requires False when no client
+        is connected (ConformU dropped that check on 2025-03-16).
         """
         with self.detection_lock:
             return self._stable_safe_state
