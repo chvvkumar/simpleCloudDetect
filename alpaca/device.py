@@ -68,10 +68,11 @@ class AlpacaSafetyMonitor:
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
         
-        # Setup MQTT client first
-        self.mqtt_client = self._setup_mqtt()
+        # Setup MQTT client first. ha_discovery must exist before _setup_mqtt()
+        # because the on_connect callback fires from the network thread and reads it.
         self.ha_discovery = None
-        
+        self.mqtt_client = self._setup_mqtt()
+
         # Pre-load cloud detector at startup
         logger.info("Pre-loading ML model...")
         self.cloud_detector = CloudDetector(self.detect_config, mqtt_client=self.mqtt_client)
@@ -216,7 +217,24 @@ class AlpacaSafetyMonitor:
         if self.detect_config.mqtt_discovery_mode == 'homeassistant':
             availability_topic = f"{self.detect_config.mqtt_discovery_prefix}/sensor/clouddetect_{self.detect_config.device_id}/availability"
             client.will_set(availability_topic, "offline", retain=True)
-            
+
+            # Republish discovery and availability on every connect, not just the
+            # first. loop_start() reconnects silently after a dropped session, and
+            # the broker publishes the retained "offline" will when that happens.
+            # Without this the device stays unavailable in Home Assistant forever
+            # even though state topics keep updating.
+            # Signature accepts paho 1.x (client, userdata, flags, rc) and
+            # 2.x (..., reason_code, properties).
+            def on_connect(client, userdata, flags, rc, properties=None):
+                if rc != 0:
+                    logger.error(f"MQTT connect failed with code {rc}")
+                    return
+                if self.ha_discovery:
+                    self.ha_discovery.publish_discovery_configs()
+                    logger.info("Republished HA discovery and availability after connect")
+
+            client.on_connect = on_connect
+
         try:
             client.connect(self.detect_config.broker, self.detect_config.port)
             client.loop_start()
