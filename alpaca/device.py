@@ -423,11 +423,12 @@ class AlpacaSafetyMonitor:
                     logger.warning(f"Attempted to disconnect unknown client: {client_ip} (ID: {client_id})")
 
     def is_safe(self) -> bool:
-        """Determine if conditions are safe based on latest detection"""
-        # Safety Fail-safe: Always return False if not connected
-        if not self.is_connected:
-            return False
-            
+        """Debounced safety state of the sky, independent of ASCOM client connections.
+
+        The Alpaca routes apply the per-client Connected gate themselves
+        (see routes/api.py client_is_safe). Everything else (external REST
+        API, dashboard, MQTT) reports this value directly.
+        """
         with self.detection_lock:
             return self._stable_safe_state
     
@@ -478,8 +479,3 @@ class AlpacaSafetyMonitor:
                     "duration_seconds": (now - conn_time).total_seconds()
                 })
         return clients
-
-    def get_device_state(self) -> list:
-        """Get current operational state"""
-        is_safe_val = self.is_safe()
-        return [{"Name": "IsSafe", "Value": is_safe_val}]

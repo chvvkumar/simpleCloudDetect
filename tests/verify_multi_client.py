@@ -20,9 +20,9 @@ def check_connected():
         log(f"Error checking connected status: {e}")
         return None
 
-def check_issafe():
+def check_issafe(client_id=0):
     try:
-        resp = requests.get(f"{BASE_URL}/issafe")
+        resp = requests.get(f"{BASE_URL}/issafe", params={'ClientID': client_id})
         resp.raise_for_status()
         return resp.json()["Value"]
     except Exception as e:
@@ -139,19 +139,31 @@ def run_tests():
             
         log("Scenario B Passed")
 
-        # Scenario C: Fail-safe
-        log("--- Scenario C: Fail-safe ---")
+        # Scenario C: Per-client IsSafe gate
+        log("--- Scenario C: Per-client IsSafe gate ---")
         # Ensure fully disconnected
         if check_connected():
              log("FAIL: System should be disconnected")
              sys.exit(1)
-             
-        is_safe = check_issafe()
-        log(f"Is Safe (while disconnected)? {is_safe}")
-        if is_safe:
-            log("FAIL: Should report Unsafe (False) when disconnected")
+
+        log("Connecting Client A (ID 1)...")
+        connect(1)
+
+        is_safe_other = check_issafe(client_id=99)
+        log(f"Is Safe for unconnected Client 99? {is_safe_other}")
+        if is_safe_other:
+            log("FAIL: A client that never connected must see IsSafe=False")
             sys.exit(1)
-            
+
+        is_safe_a = check_issafe(client_id=1)
+        log(f"Is Safe for connected Client 1? {is_safe_a}")
+        if is_safe_a is None:
+            log("FAIL: Connected client could not read IsSafe")
+            sys.exit(1)
+
+        log("Disconnecting Client A...")
+        disconnect(1)
+
         log("Scenario C Passed")
         log("ALL TESTS PASSED")
         
