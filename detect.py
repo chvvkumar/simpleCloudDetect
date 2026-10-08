@@ -190,9 +190,11 @@ class CloudDetector:
         self.model = self._load_model()
         self.class_names = self._load_class_names()
         self.session = requests.Session()  # Reuse HTTP connections
-        self.mqtt_client = mqtt_client if mqtt_client is not None else self._setup_mqtt()
+        # ha_discovery must exist before _setup_mqtt() because the on_connect
+        # callback fires from the network thread and reads it.
         self.ha_discovery = None
-        
+        self.mqtt_client = mqtt_client if mqtt_client is not None else self._setup_mqtt()
+
         # Initialize HA discovery if enabled
         if self.mqtt_client and self.config.mqtt_discovery_mode == 'homeassistant':
             self.ha_discovery = HADiscoveryManager(self.config, self.mqtt_client)
@@ -230,7 +232,22 @@ class CloudDetector:
         if self.config.mqtt_discovery_mode == 'homeassistant':
             availability_topic = f"{self.config.mqtt_discovery_prefix}/sensor/clouddetect_{self.config.device_id}/availability"
             client.will_set(availability_topic, "offline", retain=True)
-        
+
+            # Republish discovery and availability on every connect, not just the
+            # first. loop_start() reconnects silently after a dropped session, and
+            # the broker publishes the retained "offline" will when that happens.
+            # Signature accepts paho 1.x (client, userdata, flags, rc) and
+            # 2.x (..., reason_code, properties).
+            def on_connect(client, userdata, flags, rc, properties=None):
+                if rc != 0:
+                    logger.error(f"MQTT connect failed with code {rc}")
+                    return
+                if self.ha_discovery:
+                    self.ha_discovery.publish_discovery_configs()
+                    logger.info("Republished HA discovery and availability after connect")
+
+            client.on_connect = on_connect
+
         try:
             client.connect(self.config.broker, self.config.port)
             # Start background network loop to handle keepalive pings and reconnections
