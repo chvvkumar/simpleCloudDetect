@@ -20,6 +20,47 @@ def init_mgmt(safety_monitor_instance):
     global monitor
     monitor = safety_monitor_instance
 
+
+def _fmt_seconds(sec):
+    s = max(0, int(round(sec)))
+    if s < 60:
+        return f"{s}s"
+    m = s // 60
+    if m < 60:
+        return f"{m}m {s % 60}s"
+    return f"{m // 60}h {m % 60}m"
+
+
+_GREY = "rgb(100, 116, 139)"
+_GREEN = "rgb(52, 211, 153)"
+_AMBER = "rgb(251, 191, 36)"
+_RED = "rgb(248, 113, 113)"
+
+
+def image_status_view(status, is_safe=False):
+    """Dashboard text and colour for monitor.get_image_status()."""
+    if not status:
+        return {"text": "...", "color": _GREY}
+    unchanged = status.get("unchanged_sec")
+    limit = status.get("limit_sec") or 0
+    if not status.get("detection_fresh", True):
+        age = status.get("detection_age_sec")
+        return {"text": f"No detection for {_fmt_seconds(age)}" if age is not None else "No detection yet", "color": _RED}
+    if not status.get("check_enabled"):
+        return {"text": "Stale check off", "color": _GREY}
+    if status.get("hash_missing"):
+        return {"text": "Stale check off (no image hash)", "color": _GREY}
+    if status.get("stale"):
+        if status.get("changed_since_start") and unchanged is not None:
+            if is_safe:  # demote lands on the next detection cycle
+                return {"text": f"STALE: unchanged {_fmt_seconds(unchanged)} (limit {_fmt_seconds(limit)}), unsafe on next detection", "color": _RED}
+            return {"text": f"STALE: unchanged {_fmt_seconds(unchanged)}, limit {_fmt_seconds(limit)}", "color": _RED}
+        return {"text": "STALE: no new frame since start", "color": _RED}
+    if unchanged is None:
+        return {"text": "Waiting for first image", "color": _GREY}
+    color = _AMBER if unchanged > limit / 2 else _GREEN
+    return {"text": f"Changed {_fmt_seconds(unchanged)} ago (limit {_fmt_seconds(limit)})", "color": color}
+
 @mgmt_bp.route('/setup/v1/safetymonitor/<int:device_number>/setup', methods=['GET', 'POST'])
 def setup_device(device_number: int):
     """Setup page for device configuration"""
@@ -39,7 +80,8 @@ def setup_device(device_number: int):
             monitor.alpaca_config.update_interval = int(request.form.get('update_interval', monitor.alpaca_config.update_interval))
             monitor.alpaca_config.debounce_to_safe_sec = int(request.form.get('debounce_safe', monitor.alpaca_config.debounce_to_safe_sec))
             monitor.alpaca_config.debounce_to_unsafe_sec = int(request.form.get('debounce_unsafe', monitor.alpaca_config.debounce_to_unsafe_sec))
-            
+            monitor.alpaca_config.max_image_age_sec = int(request.form.get('max_image_age', monitor.alpaca_config.max_image_age_sec))
+
             # Update unsafe conditions based on radio buttons
             new_unsafe = []
             for condition in ALL_CLOUD_CONDITIONS:
@@ -86,7 +128,9 @@ def setup_device(device_number: int):
     
     # Get pending status
     pending_status = monitor.get_pending_status()
-    
+
+    image_status = monitor.get_image_status()
+
     # Format timestamp
     if timestamp:
         last_update = timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -233,6 +277,7 @@ def setup_device(device_number: int):
         update_interval=monitor.alpaca_config.update_interval,
         debounce_to_safe=monitor.alpaca_config.debounce_to_safe_sec,
         debounce_to_unsafe=monitor.alpaca_config.debounce_to_unsafe_sec,
+        max_image_age=monitor.alpaca_config.max_image_age_sec,
         current_condition=current_condition,
         current_confidence=current_confidence,
         detection_time=detection_time,
@@ -249,7 +294,8 @@ def setup_device(device_number: int):
         unsafe_conditions=unsafe_cond,
         default_threshold=monitor.alpaca_config.default_threshold,
         class_thresholds=monitor.alpaca_config.class_thresholds,
-        pending_status=pending_status
+        pending_status=pending_status,
+        image_status_view=image_status_view(image_status, is_safe)
     )
 
 

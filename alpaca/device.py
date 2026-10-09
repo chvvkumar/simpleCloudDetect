@@ -50,7 +50,6 @@ class AlpacaSafetyMonitor:
             'Detection Time (Seconds)': 0.0,
             'timestamp': None
         }
-        self._cached_is_safe = False
         self._unsafe_conditions_set = set(alpaca_config.unsafe_conditions)
         
         # Debounce state tracking
@@ -58,6 +57,15 @@ class AlpacaSafetyMonitor:
         self._pending_safe_state: Optional[bool] = None
         self._state_change_start_time: Optional[datetime] = None
         
+        # Stale image tracking: hash of the last image and when it last changed.
+        # changed_at stays None until a second distinct hash is seen after start.
+        self._last_image_hash: Optional[str] = None
+        self._image_hash_changed_at: Optional[datetime] = None
+        self._warned_no_hash = False
+        self._hash_missing = False
+        # Set by _demote() under the lock, read by _run_single_detection() after release
+        self._demoted = False
+
         # Safety state history (last 100 transitions)
         self._safety_history = deque(maxlen=100)
         
@@ -80,7 +88,7 @@ class AlpacaSafetyMonitor:
         
         # Setup HA Discovery if enabled
         if self.mqtt_client and self.detect_config.mqtt_discovery_mode == 'homeassistant':
-            self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client)
+            self.ha_discovery = HADiscoveryManager(self.detect_config, self.mqtt_client, safe_sensor=True)
             self.ha_discovery.publish_discovery_configs()
         
         # Blocking initial detection to ensure readiness
@@ -102,6 +110,11 @@ class AlpacaSafetyMonitor:
     
     def _update_cached_safety(self, detection: Dict[str, Any]):
         """Update cached safety status with debouncing logic (assumes lock is held)"""
+        # latest_detection still holds the previous result here, so this catches
+        # a gap left by failed cycles or a hung detection thread
+        if self.latest_detection.get('timestamp') is not None:
+            self._demote_if_stale()
+
         # Step A: Determine Instantaneous Safety
         class_name = detection.get('class_name', '')
         confidence = detection.get('confidence_score', 0.0)
@@ -119,12 +132,40 @@ class AlpacaSafetyMonitor:
             class_name not in self._unsafe_conditions_set
         )
         
+        # A source image that has stopped changing is never safe: commit UNSAFE
+        # at once and skip the debounce below, so no pending-safe timer runs
+        # while the image is stale. Recovery still needs debounce_to_safe_sec.
+        max_age = self.alpaca_config.max_image_age_sec
+        image_hash = detection.get('image_hash')
+        self._hash_missing = image_hash is None
+        if image_hash is None:
+            if max_age > 0 and not self._warned_no_hash:
+                self._warned_no_hash = True
+                logger.warning("image_hash missing from detector result: stale-image check disabled")
+        else:
+            # Hash history is kept even with the check disabled, so enabling it
+            # at runtime does not restart the "no change since start" rule
+            now = get_current_time(self.alpaca_config.timezone)
+            if self._last_image_hash is not None and image_hash != self._last_image_hash:
+                self._image_hash_changed_at = now
+            self._last_image_hash = image_hash
+        if max_age > 0 and image_hash is not None:
+            if self._image_hash_changed_at is None:
+                stale = "no image change seen since start"
+            else:
+                unchanged_sec = (now - self._image_hash_changed_at).total_seconds()
+                stale = f"image unchanged for {unchanged_sec:.0f}s, max {max_age}s" if unchanged_sec > max_age else None
+            if stale:
+                if is_safe_now:
+                    logger.info(f"Stale Image: {stale}; holding UNSAFE")
+                self._demote('Stale Image', stale)
+                return
+
         # Step B: Apply Debouncing
         if is_safe_now == self._stable_safe_state:
             # State matches - reset any pending changes
             self._pending_safe_state = None
             self._state_change_start_time = None
-            self._cached_is_safe = self._stable_safe_state
         else:
             # State differs from stable state
             if self._pending_safe_state != is_safe_now:
@@ -147,7 +188,6 @@ class AlpacaSafetyMonitor:
                     if elapsed_time >= required_duration:
                         # Debounce period complete - commit state change
                         self._stable_safe_state = is_safe_now
-                        self._cached_is_safe = is_safe_now
                         self._pending_safe_state = None
                         self._state_change_start_time = None
                         
@@ -158,7 +198,7 @@ class AlpacaSafetyMonitor:
                             'condition': class_name,
                             'confidence': confidence
                         })
-                        
+
                         logger.warning(f"SAFETY STATE CHANGED: {'SAFE' if is_safe_now else 'UNSAFE'} "
                                      f"(class={class_name}, confidence={confidence:.1f}%, "
                                      f"threshold={threshold:.1f}%, debounce={elapsed_time:.1f}s)")
@@ -246,6 +286,7 @@ class AlpacaSafetyMonitor:
     
     def _run_single_detection(self, initial: bool = False):
         """Run a single detection cycle with optimized image handling"""
+        self._demoted = False
         try:
             # Return image so we can process thumbnail
             result = self.cloud_detector.detect(return_image=True)
@@ -266,9 +307,11 @@ class AlpacaSafetyMonitor:
                 del result['image']
             
             with self.detection_lock:
+                self._update_cached_safety(result)
+                # Hash is only needed for the stale check; keep it out of API and MQTT output
+                result.pop('image_hash', None)
                 self.latest_detection = result
                 self.latest_image_bytes = image_bytes
-                self._update_cached_safety(result)
                 
                 if initial:
                     self._safety_history.append({
@@ -278,22 +321,28 @@ class AlpacaSafetyMonitor:
                         'confidence': result.get('confidence_score', 0.0)
                     })
             
-            # MQTT Publish
+            # MQTT Publish (outside the lock: is_safe() takes it)
             if self.mqtt_client:
                 try:
                     mqtt_result = result.copy()
                     if 'timestamp' in mqtt_result and isinstance(mqtt_result['timestamp'], datetime):
                         mqtt_result['timestamp'] = mqtt_result['timestamp'].isoformat()
-                    
+
                     if self.detect_config.mqtt_discovery_mode == 'homeassistant':
                         self.ha_discovery.publish_states(mqtt_result)
                     else:
+                        mqtt_result['is_safe'] = self.is_safe()
                         self.mqtt_client.publish(self.detect_config.topic, json.dumps(mqtt_result))
                 except Exception as e:
                     logger.error(f"MQTT publish failed: {e}")
+            self._publish_safety(data_online=not self._demoted)
 
         except Exception as e:
             logger.error(f"Detection cycle failed: {e}")
+            with self.detection_lock:
+                self._demote_if_stale()
+            if self._demoted:
+                self._publish_safety(data_online=False)
     
     def _detection_loop(self):
         """Background thread for continuous cloud detection"""
@@ -448,8 +497,73 @@ class AlpacaSafetyMonitor:
         API, dashboard, MQTT) reports this value directly.
         """
         with self.detection_lock:
-            return self._stable_safe_state
+            return self._stable_safe_state and self._detection_is_fresh()
     
+    def _demote(self, condition: str, detail: str):
+        """Commit UNSAFE now and drop any pending debounce (assumes lock is held).
+
+        Recovery then has to pass debounce_to_safe_sec like any other transition.
+        """
+        self._demoted = True
+        self._pending_safe_state = None
+        self._state_change_start_time = None
+        if self._stable_safe_state:
+            self._stable_safe_state = False
+            self._safety_history.append({
+                'timestamp': get_current_time(self.alpaca_config.timezone),
+                'is_safe': False,
+                'condition': condition,
+                'confidence': 0.0
+            })
+            logger.warning(f"SAFETY STATE CHANGED: UNSAFE (class={condition}, {detail})")
+
+    def _demote_if_stale(self):
+        """Demote once the last successful detection is too old (assumes lock is held)"""
+        if not self._detection_is_fresh():
+            self._demote('Detection Stale', f"last success {self.latest_detection.get('timestamp')}")
+
+    def _publish_safety(self, data_online: bool):
+        """Publish HA data availability and the IsSafe binary sensor. Never call under detection_lock."""
+        if not self.ha_discovery:
+            return
+        try:
+            self.ha_discovery.publish_data_availability(data_online)
+            self.ha_discovery.publish_safe(self.is_safe())
+        except Exception as e:
+            logger.error(f"MQTT publish failed: {e}")
+    
+    def _detection_is_fresh(self) -> bool:
+        """True if the last successful detection is recent enough to trust (assumes lock is held).
+
+        Fails safe when detect() keeps raising: latest_detection stops updating,
+        so its timestamp ages past the limit.
+        """
+        timestamp = self.latest_detection.get('timestamp') if self.latest_detection else None
+        if timestamp is None:
+            return False
+        max_age = max(180, 3 * self.alpaca_config.update_interval)
+        return (get_current_time(self.alpaca_config.timezone) - timestamp).total_seconds() <= max_age
+    
+    def get_image_status(self) -> Dict[str, Any]:
+        """Stale-image check state for the dashboard, from the same fields the demote logic uses"""
+        with self.detection_lock:
+            now = get_current_time(self.alpaca_config.timezone)
+            limit = self.alpaca_config.max_image_age_sec
+            changed = self._image_hash_changed_at is not None
+            unchanged_sec = (now - self._image_hash_changed_at).total_seconds() if changed else None
+            last_ts = self.latest_detection.get('timestamp')
+            return {
+                'check_enabled': limit > 0,
+                'limit_sec': limit,
+                'unchanged_sec': unchanged_sec,
+                'changed_since_start': changed,
+                'hash_missing': self._hash_missing,
+                # A missing hash disables the check (see _update_cached_safety), so never report stale then
+                'stale': limit > 0 and not self._hash_missing and (not changed or unchanged_sec > limit),
+                'detection_fresh': self._detection_is_fresh(),
+                'detection_age_sec': (now - last_ts).total_seconds() if last_ts else None,
+            }
+
     def get_pending_status(self) -> Dict[str, Any]:
         """Get information about any pending state changes"""
         with self.detection_lock:
