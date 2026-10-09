@@ -1,4 +1,4 @@
-"""IsSafe is gated per Alpaca client; the external API reports raw detector state."""
+"""IsSafe reports raw detector state on every surface, with or without a connected Alpaca client."""
 import threading
 from types import SimpleNamespace
 
@@ -13,7 +13,6 @@ class FakeMonitor:
     def __init__(self, safe=True):
         self.alpaca_config = SimpleNamespace(device_number=0)
         self._safe = safe
-        self.connected = set()
         self.detection_lock = threading.Lock()
         self.latest_detection = None
 
@@ -30,9 +29,6 @@ class FakeMonitor:
             "ErrorMessage": error_message,
             "ClientTransactionID": client_transaction_id,
         }
-
-    def is_client_connected(self, ip, client_id):
-        return (ip, client_id) in self.connected
 
     def is_safe(self):
         return self._safe
@@ -52,26 +48,21 @@ def harness():
     return app.test_client(), monitor
 
 
-def test_issafe_false_for_unconnected_client(harness):
+def test_issafe_true_without_connected_client(harness):
     client, _ = harness
-    resp = client.get("/api/v1/safetymonitor/0/issafe?ClientID=5")
-    assert resp.get_json()["Value"] is False
-
-
-def test_issafe_true_for_connected_client_only(harness):
-    client, monitor = harness
-    monitor.connected.add(("127.0.0.1", 5))
+    assert client.get("/api/v1/safetymonitor/0/issafe").get_json()["Value"] is True
     assert client.get("/api/v1/safetymonitor/0/issafe?ClientID=5").get_json()["Value"] is True
-    assert client.get("/api/v1/safetymonitor/0/issafe?ClientID=6").get_json()["Value"] is False
 
 
-def test_devicestate_uses_same_gate(harness):
+def test_issafe_tracks_detector_state(harness):
     client, monitor = harness
-    assert client.get("/api/v1/safetymonitor/0/devicestate?ClientID=5").get_json()["Value"] == [
-        {"Name": "IsSafe", "Value": False}
-    ]
-    monitor.connected.add(("127.0.0.1", 5))
-    assert client.get("/api/v1/safetymonitor/0/devicestate?ClientID=5").get_json()["Value"] == [
+    monitor._safe = False
+    assert client.get("/api/v1/safetymonitor/0/issafe").get_json()["Value"] is False
+
+
+def test_devicestate_matches_issafe(harness):
+    client, _ = harness
+    assert client.get("/api/v1/safetymonitor/0/devicestate").get_json()["Value"] == [
         {"Name": "IsSafe", "Value": True}
     ]
 

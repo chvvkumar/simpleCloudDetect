@@ -5,7 +5,9 @@ import types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-if 'keras' not in sys.modules:
+try:
+    import keras.models  # noqa: F401
+except ImportError:
     keras_models = types.ModuleType('keras.models')
     keras_models.load_model = lambda *a, **k: None
     keras = types.ModuleType('keras')

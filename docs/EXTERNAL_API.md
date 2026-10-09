@@ -114,7 +114,7 @@ Returns current safety status and latest detection results.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `is_safe` | boolean | Debounced detector state. Does not depend on any ASCOM client being connected. |
+| `is_safe` | boolean | Debounced detector state. Does not depend on any ASCOM client being connected. The Alpaca `issafe` endpoint returns the same value. |
 | `safety_status` | string | "Safe" or "Unsafe" |
 | `detection.class_name` | string | Detected condition (Clear, Wisps, Mostly Cloudy, etc.) |
 | `detection.confidence_score` | number | ML model confidence (0.0 - 1.0) |
