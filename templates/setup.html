@@ -245,15 +245,17 @@
             .info-tooltip:hover::after {
                 content: attr(data-tooltip);
                 position: absolute;
-                left: 100%;
-                top: 50%;
-                transform: translateY(-50%);
-                margin-left: 10px;
+                right: 0;
+                top: 100%;
+                margin-top: 6px;
+                width: max-content;
+                max-width: 280px;
                 padding: 8px 12px;
                 background-color: rgb(30, 41, 59);
                 color: rgb(226, 232, 240);
                 border-radius: 6px;
-                white-space: nowrap;
+                white-space: normal;
+                text-align: left;
                 font-size: 11px;
                 font-weight: normal;
                 text-transform: none;
@@ -781,7 +783,7 @@
                                     <div class="detection-item">
                                         <div class="detection-label">
                                             Safety State
-                                            <span class="info-tooltip" data-tooltip="Debounced detector state, also served by the external API and MQTT. ASCOM clients receive this value only while connected.">ⓘ</span>
+                                            <span class="info-tooltip" data-tooltip="Debounced detector state, served identically by ASCOM Alpaca IsSafe, the external API and MQTT, whether or not any client is connected.">ⓘ</span>
                                         </div>
                                         <div class="detection-value" style="color: {{ ascom_safe_color }};">{{ ascom_safe_status }}</div>
                                     </div>
@@ -791,7 +793,7 @@
                                     </div>
                                     <div class="detection-item">
                                         <div class="detection-label">Last Updated</div>
-                                        <div class="detection-value" style="font-size: 16px;">{{ last_update }}</div>
+                                        <div class="detection-value" style="font-size: 16px;{% if image_status_view.color != 'rgb(100, 116, 139)' %} color: {{ image_status_view.color }};{% endif %}">{{ last_update }}</div>
                                         <div class="detection-sub" style="margin-top: 6px;">
                                             {% if pending_status.is_pending %}
                                             <span style="color: rgb(251, 191, 36); font-weight: 600;">⏳ {{ pending_status.target_state }}</span>
@@ -802,12 +804,24 @@
                                         </div>
                                     </div>
                                     <div class="detection-item">
+                                        <div class="detection-label">
+                                            Image
+                                            <span class="info-tooltip" data-tooltip="Time since the camera image last changed. Turns amber past half the Stale Image Limit and red once stale, forcing unsafe on the next detection.">ⓘ</span>
+                                        </div>
+                                        <div class="detection-value" id="image-status" style="font-size: 16px; color: {{ image_status_view.color }};">{{ image_status_view.text }}</div>
+                                        {% if image_status_view.subtext %}
+                                        <div class="detection-sub" style="margin-top: 6px;">
+                                            <span style="color: rgb(100, 116, 139);">{{ image_status_view.subtext }}</span>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="detection-item">
                                         <div class="detection-label">Container Uptime</div>
                                         <div class="detection-value" style="font-size: 16px;">{{ container_uptime }}</div>
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- Safety State History -->
                             <div class="status-card">
                                 <div class="status-card-title">📜 Safety History</div>
@@ -952,14 +966,14 @@
                         .then(html => {
                             const parser = new DOMParser();
                             const doc = parser.parseFromString(html, 'text/html');
-                            
+
                             // Update Current Detection - all fields including Detection Time and Last Updated
                             const detectionGrid = document.querySelector('.detection-grid');
                             const newDetectionGrid = doc.querySelector('.detection-grid');
                             if (detectionGrid && newDetectionGrid) {
                                 detectionGrid.innerHTML = newDetectionGrid.innerHTML;
                             }
-                            
+
                             // Update Safety History - find by looking for the title text
                             const statusCards = document.querySelectorAll('.status-card');
                             const newStatusCards = doc.querySelectorAll('.status-card');
@@ -1243,8 +1257,28 @@
                                                 </div>
                                                 <div id="unsafe-coverage" style="margin-top: 8px; padding: 8px; background: rgba(248, 113, 113, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
                                             </div>
+
+                                            <!-- Stale Image Card -->
+                                            <div style="grid-column: 1 / -1; background: rgba(251, 191, 36, 0.1); border: 2px solid rgba(251, 191, 36, 0.4); border-radius: 8px; padding: 16px;">
+                                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                                                    <div style="width: 40px; height: 40px; background: rgb(251, 191, 36); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">⏳</div>
+                                                    <div>
+                                                        <div style="color: rgb(251, 191, 36); font-weight: 600; font-size: 13px;">STALE IMAGE LIMIT</div>
+                                                        <div id="stale-display" style="color: rgb(148, 163, 184); font-size: 11px;">600s</div>
+                                                    </div>
+                                                </div>
+                                                <div style="color: rgb(203, 213, 225); font-size: 12px; line-height: 1.5;">
+                                                    Unsafe if the camera image has not changed for this long. Fixed companion rule: unsafe if no detection succeeds for max(180s, 3 x ASCOM interval).
+                                                </div>
+                                                <div id="stale-coverage" style="margin-top: 8px; padding: 8px; background: rgba(251, 191, 36, 0.1); border-radius: 4px; color: rgb(148, 163, 184); font-size: 11px;"></div>
+                                            </div>
                                         </div>
-                                        
+
+                                        <!-- Fail-safes -->
+                                        <div style="margin-top: 16px; color: rgb(203, 213, 225); font-size: 12px; line-height: 1.6;">
+                                            <strong style="color: rgb(226, 232, 240);">Fail-safes.</strong> Two checks force Unsafe independently of the detected condition: the Stale Image Limit (configurable below) when the source image stops changing, and the detection failure limit, fixed at max(180 s, 3 x ASCOM Update Interval), when the image server is unreachable or detection errors. Recovery from either always waits the Safe Wait Time. The Safety History shows "Stale Image" or "Detection Stale" as the condition when one of these triggers.
+                                        </div>
+
                                         <!-- Example Scenario -->
                                         <div id="scenario-example" style="margin-top: 20px; padding: 16px; background: rgba(30, 41, 59, 0.6); border-radius: 8px; border-left: 4px solid rgb(251, 191, 36);">
                                             <div style="color: rgb(251, 191, 36); font-weight: 600; font-size: 12px; margin-bottom: 8px;">💡 EXAMPLE SCENARIO</div>
@@ -1299,14 +1333,30 @@
                                             <p class="help-text">Delay before reporting unsafe conditions (0 = immediate)</p>
                                         </div>
                                     </div>
-                                    
+
+                                    <div class="input-row">
+                                        <div class="form-group">
+                                            <label for="max_image_age" style="color: rgb(251, 191, 36);">Stale Image Limit (seconds)</label>
+                                            <input type="number" id="max_image_age" name="max_image_age"
+                                                   value="{{ max_image_age }}" min="0" max="86400" step="1" placeholder="600"
+                                                   style="width: 100%; padding: 12px 16px; background: rgba(15, 23, 42, 0.6);
+                                                          border: 1px solid rgb(71, 85, 105); border-radius: 6px;
+                                                          color: rgb(241, 245, 249); font-size: 14px; font-family: 'JetBrains Mono', monospace;
+                                                          transition: all 0.2s ease;">
+                                            <p class="help-text">Unsafe if the source image has not changed for this long. 0 disables. Must exceed the camera's longest gap between frames plus the ASCOM Update Interval. A camera that stops writing images (for example daytime capture disabled) reads unsafe unless this is raised or set to 0. After a restart, safe requires one new frame first.</p>
+                                        </div>
+                                    </div>
+
                                     <script>
                                     function updateTimingVisualization() {
                                         const detectionInterval = parseInt(document.getElementById('detection_interval').value) || 30;
                                         const updateInterval = parseInt(document.getElementById('update_interval').value) || 30;
                                         const debounceSafe = parseInt(document.getElementById('debounce_safe').value) || 60;
                                         const debounceUnsafe = parseInt(document.getElementById('debounce_unsafe').value) || 0;
-                                        
+                                        const maxImageAgeRaw = parseInt(document.getElementById('max_image_age').value);
+                                        const maxImageAge = isNaN(maxImageAgeRaw) ? 600 : maxImageAgeRaw;
+                                        const detectionStaleLimit = Math.max(180, 3 * updateInterval);
+
                                         // Update displays
                                         document.getElementById('fetch-display').textContent = `Every ${detectionInterval}s`;
                                         document.getElementById('ascom-display').textContent = `Every ${updateInterval}s`;
@@ -1329,7 +1379,19 @@
                                         } else {
                                             document.getElementById('unsafe-coverage').textContent = 'Reports unsafe immediately - closes roof on first bad detection';
                                         }
-                                        
+
+                                        document.getElementById('stale-display').textContent = maxImageAge > 0 ? `${maxImageAge}s` : 'Disabled';
+                                        if (maxImageAge > 0) {
+                                            let staleText = '';
+                                            if (maxImageAge <= updateInterval) {
+                                                staleText += `⚠️ <strong>Warning:</strong> limit must exceed your camera's frame interval plus the ASCOM Update Interval (${updateInterval}s); the camera interval is not known here.<br>`;
+                                            }
+                                            staleText += `Unsafe within ${maxImageAge}s to ${maxImageAge + 2 * updateInterval}s after the last new frame. Detection failure: unsafe after ${detectionStaleLimit}s. Recovery always waits the Safe Wait Time (${debounceSafe}s) after a new frame.`;
+                                            document.getElementById('stale-coverage').innerHTML = staleText;
+                                        } else {
+                                            document.getElementById('stale-coverage').textContent = `Stale image check disabled. Detection failure limit still applies: unsafe after ${detectionStaleLimit}s without a successful detection.`;
+                                        }
+
                                         // Generate example scenario
                                         const scenarioDiv = document.querySelector('#scenario-example > div:last-child');
                                         let scenario = '';
@@ -1355,7 +1417,12 @@
                                                 unsafeScenario = `<br><br>Rain detected at 00:00 → AI detects "Rain" at ${formatTime(detectionInterval)} → ⚡ Immediately reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> (roof closes!)`;
                                             }
                                             
-                                            scenario = safeScenario + unsafeScenario;
+                                            let staleScenario = '';
+                                            if (maxImageAge > 0) {
+                                                staleScenario = `<br><br>Camera stops updating at 00:00 → image unchanged → Reports <strong style="color: rgb(248, 113, 113);">UNSAFE</strong> at ~${formatTime(maxImageAge + 2 * updateInterval)} → Camera resumes → Reports <strong style="color: rgb(52, 211, 153);">SAFE</strong> ${debounceSafe}s after the first new frame`;
+                                            }
+
+                                            scenario = safeScenario + unsafeScenario + staleScenario;
                                         }
                                         
                                         scenarioDiv.innerHTML = scenario;
@@ -1376,7 +1443,7 @@
                                     }
                                     
                                     document.addEventListener('DOMContentLoaded', function() {
-                                        const timingInputs = ['detection_interval', 'update_interval', 'debounce_safe', 'debounce_unsafe'];
+                                        const timingInputs = ['detection_interval', 'update_interval', 'debounce_safe', 'debounce_unsafe', 'max_image_age'];
                                         timingInputs.forEach(id => {
                                             const input = document.getElementById(id);
                                             if (input) {

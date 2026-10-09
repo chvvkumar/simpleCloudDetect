@@ -6,6 +6,7 @@ import socket
 import time
 import json
 import gc
+import hashlib
 import io
 import urllib.parse
 from dataclasses import dataclass
@@ -87,13 +88,20 @@ class Config:
 
 class HADiscoveryManager:
     """Manages Home Assistant MQTT Discovery"""
-    def __init__(self, config: Config, mqtt_client):
+    def __init__(self, config: Config, mqtt_client, safe_sensor: bool = False):
         self.config = config
         self.mqtt_client = mqtt_client
+        # Only the Alpaca monitor has a safety state to publish; standalone detect.py does not
+        self.safe_sensor = safe_sensor
         self.device_id = config.device_id
         self.discovery_prefix = config.mqtt_discovery_prefix
         self.availability_topic = f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/availability"
-        
+        # Second availability topic: offline while results are stale or failing.
+        # The LWT topic above only tracks the MQTT session.
+        self.data_availability_topic = f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/data_availability"
+        self.safe_topic = f"{self.discovery_prefix}/binary_sensor/clouddetect_{self.device_id}/safe/state"
+        self.data_online = True
+
     def get_device_info(self) -> dict:
         """Get device information dict for HA discovery"""
         return {
@@ -107,13 +115,16 @@ class HADiscoveryManager:
     def publish_discovery_configs(self):
         """Publish discovery configuration for all sensors"""
         device_info = self.get_device_info()
-        
+        # Sensors need both the MQTT session and current data
+        availability = [{"topic": self.availability_topic}, {"topic": self.data_availability_topic}]
+
         # Cloud Status Sensor
         status_config = {
             "name": "Status",
             "unique_id": f"clouddetect_{self.device_id}_status",
             "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/status/state",
-            "availability_topic": self.availability_topic,
+            "availability": availability,
+            "availability_mode": "all",
             "icon": "mdi:weather-cloudy",
             "device": device_info
         }
@@ -128,7 +139,8 @@ class HADiscoveryManager:
             "name": "Confidence",
             "unique_id": f"clouddetect_{self.device_id}_confidence",
             "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/confidence/state",
-            "availability_topic": self.availability_topic,
+            "availability": availability,
+            "availability_mode": "all",
             "unit_of_measurement": "%",
             "icon": "mdi:percent",
             "device": device_info
@@ -144,7 +156,8 @@ class HADiscoveryManager:
             "name": "Detection Time",
             "unique_id": f"clouddetect_{self.device_id}_detection_time",
             "state_topic": f"{self.discovery_prefix}/sensor/clouddetect_{self.device_id}/detection_time/state",
-            "availability_topic": self.availability_topic,
+            "availability": availability,
+            "availability_mode": "all",
             "unit_of_measurement": "s",
             "device_class": "duration",
             "icon": "mdi:timer",
@@ -156,10 +169,38 @@ class HADiscoveryManager:
             retain=True
         )
         
-        # Publish availability as online
+        # IsSafe binary sensor. Only tied to the session: it reads OFF, not
+        # unavailable, while data is stale. No device_class (HA "safety" means ON = unsafe).
+        if self.safe_sensor:
+            safe_config = {
+                "name": "Safe",
+                "unique_id": f"clouddetect_{self.device_id}_safe",
+                "state_topic": self.safe_topic,
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "availability": [{"topic": self.availability_topic}],
+                "device": device_info
+            }
+            self.mqtt_client.publish(
+                f"{self.discovery_prefix}/binary_sensor/clouddetect_{self.device_id}/safe/config",
+                json.dumps(safe_config),
+                retain=True
+            )
+
+        # Publish availability as online (data: last known state, for reconnects)
         self.mqtt_client.publish(self.availability_topic, "online", retain=True)
+        self.publish_data_availability(self.data_online)
         logger.info("Published HA discovery configurations")
-    
+
+    def publish_data_availability(self, online: bool):
+        """Mark sensor data current (online) or stale/failing (offline)"""
+        self.data_online = online
+        self.mqtt_client.publish(self.data_availability_topic, "online" if online else "offline", retain=True)
+
+    def publish_safe(self, is_safe: bool):
+        """Publish the IsSafe binary sensor state"""
+        self.mqtt_client.publish(self.safe_topic, "ON" if is_safe else "OFF", retain=True)
+
     def publish_states(self, result: dict):
         """Publish individual sensor states for HA discovery mode"""
         # Publish cloud status
@@ -259,8 +300,12 @@ class CloudDetector:
             logger.error(f"Failed to connect to MQTT broker: {e}")
             raise
 
-    def _load_image(self, image_url: str, max_retries: int = 3) -> Image.Image:
-        """Load and return image from URL or file with retry logic and strict timeouts"""
+    def _load_image(self, image_url: str, max_retries: int = 3) -> tuple:
+        """Load image from URL or file with retry logic and strict timeouts.
+
+        Returns (image, sha1 hex digest of the raw bytes). The hash lets the
+        caller detect a source image that has stopped changing.
+        """
         for attempt in range(max_retries):
             try:
                 if image_url.startswith("file://"):
@@ -274,14 +319,14 @@ class CloudDetector:
                     file_path = Path(path_str)
                     if not file_path.exists():
                         raise FileNotFoundError(f"Image file not found: {file_path}")
-                    with open(file_path, 'rb') as f:
-                        return Image.open(f).convert("RGB")
+                    data = file_path.read_bytes()
                 else:
                     # FIX: Strict timeout (5s connect, 10s read) and close socket immediately
                     with self.session.get(image_url, timeout=(5, 10), stream=True, verify=self.config.verify_ssl) as response:
                         response.raise_for_status()
                         # Load into memory buffer to allow socket to close
-                        return Image.open(io.BytesIO(response.content)).convert("RGB")
+                        data = response.content
+                return Image.open(io.BytesIO(data)).convert("RGB"), hashlib.sha1(data).hexdigest()
             except (requests.RequestException, IOError) as e:
                 if attempt == max_retries - 1:  # Last attempt
                     logger.error(f"Failed to load image from {image_url} after {max_retries} attempts: {e}")
@@ -307,7 +352,7 @@ class CloudDetector:
         
         try:
             # Load and preprocess image
-            image = self._load_image(self.config.image_url)
+            image, image_hash = self._load_image(self.config.image_url)
             preprocessed_image = self._preprocess_image(image)
             
             # Make prediction
@@ -332,7 +377,8 @@ class CloudDetector:
             result = {
                 "class_name": class_name,
                 "confidence_score": round(confidence_score * 100, 2),
-                "Detection Time (Seconds)": round(elapsed_time, 2)
+                "Detection Time (Seconds)": round(elapsed_time, 2),
+                "image_hash": image_hash
             }
             
             # Optionally include the raw image before cleanup
@@ -375,6 +421,7 @@ class CloudDetector:
         while True:
             try:
                 result = self.detect()
+                result.pop('image_hash', None)
                 self.publish_result(result)
                 time.sleep(self.config.detect_interval)
             except Exception as e:
