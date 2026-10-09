@@ -810,6 +810,11 @@
                                             <span class="info-tooltip" data-tooltip="Time since the camera image last changed. Turns amber past half the Stale Image Limit and red once stale, forcing unsafe on the next detection.">ⓘ</span>
                                         </div>
                                         <div class="detection-value" id="image-status" style="font-size: 16px; color: {{ image_status_view.color }};">{{ image_status_view.text }}</div>
+                                        {% if image_status_view.subtext %}
+                                        <div class="detection-sub" style="margin-top: 6px;">
+                                            <span style="color: rgb(100, 116, 139);">{{ image_status_view.subtext }}</span>
+                                        </div>
+                                        {% endif %}
                                     </div>
                                     <div class="detection-item">
                                         <div class="detection-label">Container Uptime</div>
