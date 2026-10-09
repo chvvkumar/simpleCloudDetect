@@ -68,10 +68,11 @@ class AlpacaSafetyMonitor:
         self.detection_thread: Optional[threading.Thread] = None
         self.stop_detection = threading.Event()
         
-        # Setup MQTT client first
-        self.mqtt_client = self._setup_mqtt()
+        # Setup MQTT client first. ha_discovery must exist before _setup_mqtt()
+        # because the on_connect callback fires from the network thread and reads it.
         self.ha_discovery = None
-        
+        self.mqtt_client = self._setup_mqtt()
+
         # Pre-load cloud detector at startup
         logger.info("Pre-loading ML model...")
         self.cloud_detector = CloudDetector(self.detect_config, mqtt_client=self.mqtt_client)
@@ -216,7 +217,24 @@ class AlpacaSafetyMonitor:
         if self.detect_config.mqtt_discovery_mode == 'homeassistant':
             availability_topic = f"{self.detect_config.mqtt_discovery_prefix}/sensor/clouddetect_{self.detect_config.device_id}/availability"
             client.will_set(availability_topic, "offline", retain=True)
-            
+
+            # Republish discovery and availability on every connect, not just the
+            # first. loop_start() reconnects silently after a dropped session, and
+            # the broker publishes the retained "offline" will when that happens.
+            # Without this the device stays unavailable in Home Assistant forever
+            # even though state topics keep updating.
+            # Signature accepts paho 1.x (client, userdata, flags, rc) and
+            # 2.x (..., reason_code, properties).
+            def on_connect(client, userdata, flags, rc, properties=None):
+                if rc != 0:
+                    logger.error(f"MQTT connect failed with code {rc}")
+                    return
+                if self.ha_discovery:
+                    self.ha_discovery.publish_discovery_configs()
+                    logger.info("Republished HA discovery and availability after connect")
+
+            client.on_connect = on_connect
+
         try:
             client.connect(self.detect_config.broker, self.detect_config.port)
             client.loop_start()
@@ -423,11 +441,12 @@ class AlpacaSafetyMonitor:
                     logger.warning(f"Attempted to disconnect unknown client: {client_ip} (ID: {client_id})")
 
     def is_safe(self) -> bool:
-        """Determine if conditions are safe based on latest detection"""
-        # Safety Fail-safe: Always return False if not connected
-        if not self.is_connected:
-            return False
-            
+        """Debounced safety state of the sky, independent of ASCOM client connections.
+
+        The Alpaca routes apply the per-client Connected gate themselves
+        (see routes/api.py client_is_safe). Everything else (external REST
+        API, dashboard, MQTT) reports this value directly.
+        """
         with self.detection_lock:
             return self._stable_safe_state
     
@@ -478,8 +497,3 @@ class AlpacaSafetyMonitor:
                     "duration_seconds": (now - conn_time).total_seconds()
                 })
         return clients
-
-    def get_device_state(self) -> list:
-        """Get current operational state"""
-        is_safe_val = self.is_safe()
-        return [{"Name": "IsSafe", "Value": is_safe_val}]

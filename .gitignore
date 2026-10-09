@@ -31,3 +31,11 @@ htmlcov/
 
 # Logs
 *.log
+
+# Agent tooling
+docs/superpowers/
+
+# Local reference docs (fetched, not tracked)
+docs/reference/
+.claude/
+CLAUDE.md
