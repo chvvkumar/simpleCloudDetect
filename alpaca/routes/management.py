@@ -37,29 +37,34 @@ _AMBER = "rgb(251, 191, 36)"
 _RED = "rgb(248, 113, 113)"
 
 
-def image_status_view(status, is_safe=False):
-    """Dashboard text and colour for monitor.get_image_status()."""
+def image_status_view(status, is_safe=False, detection_limit_sec=None):
+    """Dashboard value line, grey subtext and colour for monitor.get_image_status()."""
+    def view(text, subtext, color):
+        return {"text": text, "subtext": subtext, "color": color}
+
     if not status:
-        return {"text": "...", "color": _GREY}
+        return view("...", "", _GREY)
     unchanged = status.get("unchanged_sec")
     limit = status.get("limit_sec") or 0
+    limit_text = f"Limit {_fmt_seconds(limit)}"
     if not status.get("detection_fresh", True):
         age = status.get("detection_age_sec")
-        return {"text": f"No detection for {_fmt_seconds(age)}" if age is not None else "No detection yet", "color": _RED}
+        text = f"No detection for {_fmt_seconds(age)}" if age is not None else "No detection yet"
+        return view(text, f"Limit {_fmt_seconds(detection_limit_sec)}" if detection_limit_sec else "", _RED)
     if not status.get("check_enabled"):
-        return {"text": "Stale check off", "color": _GREY}
+        return view("Stale check off", "Limit disabled", _GREY)
     if status.get("hash_missing"):
-        return {"text": "Stale check off (no image hash)", "color": _GREY}
+        return view("Stale check off", "No image hash from detector", _GREY)
     if status.get("stale"):
         if status.get("changed_since_start") and unchanged is not None:
             if is_safe:  # demote lands on the next detection cycle
-                return {"text": f"STALE: unchanged {_fmt_seconds(unchanged)} (limit {_fmt_seconds(limit)}), unsafe on next detection", "color": _RED}
-            return {"text": f"STALE: unchanged {_fmt_seconds(unchanged)}, limit {_fmt_seconds(limit)}", "color": _RED}
-        return {"text": "STALE: no new frame since start", "color": _RED}
+                return view(f"Changed: {_fmt_seconds(unchanged)} ago", f"{limit_text}, unsafe on next detection", _RED)
+            return view(f"STALE: unchanged {_fmt_seconds(unchanged)}", limit_text, _RED)
+        return view("STALE: no new frame since start", limit_text, _RED)
     if unchanged is None:
-        return {"text": "Waiting for first image", "color": _GREY}
+        return view("Waiting for first image", "", _GREY)
     color = _AMBER if unchanged > limit / 2 else _GREEN
-    return {"text": f"Changed {_fmt_seconds(unchanged)} ago (limit {_fmt_seconds(limit)})", "color": color}
+    return view(f"Changed: {_fmt_seconds(unchanged)} ago", limit_text, color)
 
 @mgmt_bp.route('/setup/v1/safetymonitor/<int:device_number>/setup', methods=['GET', 'POST'])
 def setup_device(device_number: int):
@@ -295,7 +300,8 @@ def setup_device(device_number: int):
         default_threshold=monitor.alpaca_config.default_threshold,
         class_thresholds=monitor.alpaca_config.class_thresholds,
         pending_status=pending_status,
-        image_status_view=image_status_view(image_status, is_safe)
+        image_status_view=image_status_view(image_status, is_safe,
+                                            max(180, 3 * monitor.alpaca_config.update_interval))
     )
 
 
