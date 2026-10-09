@@ -245,15 +245,17 @@
             .info-tooltip:hover::after {
                 content: attr(data-tooltip);
                 position: absolute;
-                left: 100%;
-                top: 50%;
-                transform: translateY(-50%);
-                margin-left: 10px;
+                right: 0;
+                top: 100%;
+                margin-top: 6px;
+                width: max-content;
+                max-width: 280px;
                 padding: 8px 12px;
                 background-color: rgb(30, 41, 59);
                 color: rgb(226, 232, 240);
                 border-radius: 6px;
-                white-space: nowrap;
+                white-space: normal;
+                text-align: left;
                 font-size: 11px;
                 font-weight: normal;
                 text-transform: none;
