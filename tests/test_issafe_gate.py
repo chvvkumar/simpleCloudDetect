@@ -37,6 +37,9 @@ class FakeMonitor:
     def is_safe(self):
         return self._safe
 
+    def get_image_status(self):
+        return None
+
 
 @pytest.fixture
 def harness():

@@ -1,3 +1,17 @@
+"""Shared test setup: repo root on sys.path, an onnxruntime stub when the real one is absent, and ONNX fixtures."""
+import os
+import sys
+import types
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    import onnxruntime  # noqa: F401
+except ImportError:
+    ort = types.ModuleType('onnxruntime')
+    ort.InferenceSession = lambda *a, **k: None
+    sys.modules['onnxruntime'] = ort
+
 import numpy as np
 import onnx
 import pytest

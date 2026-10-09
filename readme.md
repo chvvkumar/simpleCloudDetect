@@ -124,6 +124,7 @@ docker pull chvvkumar/simpleclouddetect:latest
 | `ALPACA_PORT` | `11111` | HTTP API port |
 | `ALPACA_DEVICE_NUMBER` | `0` | Device number |
 | `ALPACA_UPDATE_INTERVAL` | `30` | Update interval in seconds |
+| `MAX_IMAGE_AGE_SEC` | `600` | Report unsafe if the source image is unchanged for this many seconds. `0` disables the check. Applies only until `alpaca_config.json` exists; afterwards use the setup page or the JSON key `max_image_age_sec` |
 
 > **Note:** For detailed Alpaca configuration, see **[ALPACA_README.md](ALPACA_README.md)**
 
@@ -280,7 +281,9 @@ When using `MQTT_DISCOVERY_MODE=homeassistant`, your device automatically appear
   - **Cloud Status** - Current sky condition
   - **Confidence** - Detection confidence (%)
   - **Detection Time** - Processing time (seconds)
-- Availability tracking (online/offline status)
+- One binary sensor:
+  - **Safe** (`binary_sensor.<device_name>_safe`) - `ON` when the monitor reports safe, `OFF` when unsafe or when data is stale (see [Stale Data Fail-Safes](#stale-data-fail-safes))
+- Availability tracking (online/offline status). The three sensors also go `unavailable` while data is stale
 - Proper device grouping in HA UI
 
 **Setup Steps:**
@@ -320,6 +323,8 @@ mqtt:
       unit_of_measurement: "s"
 ```
 
+The Alpaca server also adds `is_safe` (`true`/`false`) to this payload. It is sent only on successful detection cycles, so treat a missing update for more than 3 minutes as unsafe.
+
 ---
 
 ## ASCOM Alpaca SafetyMonitor
@@ -334,6 +339,36 @@ The container includes an ASCOM Alpaca SafetyMonitor service (Interface Version 
 4. **Add to Software**: Configure in N.I.N.A., SGP, TheSkyX, etc.
 
 ![Alpaca Setup Page](/images/setup.jpg)
+
+### Stale Data Fail-Safes
+
+`IsSafe` reports `False` when the input data can no longer be trusted:
+
+1. **Unchanged image**: each detection hashes the raw image bytes. If the hash does not change for longer than `max_image_age_sec` (default 600), the monitor commits unsafe immediately. The Unsafe Wait Time does not apply. Recovery requires a changed image followed by the normal Safe Wait Time. Set to `0` to disable, for example when the camera serves a static test image.
+2. **Failed detections**: if no detection has succeeded within `max(180, 3 x ALPACA_UPDATE_INTERVAL)` seconds, for example because the image URL returns errors or times out, `IsSafe` reports `False` and the stable state is committed to unsafe. After detections succeed again, the normal Safe Wait Time applies before `IsSafe` returns `True`. This limit is not configurable.
+
+The Safety History on the setup page records these events with the condition `Stale Image` or `Detection Stale`.
+
+Configuration:
+
+- Setup page: Timing Configuration, "Stale Image Limit (seconds)".
+- JSON: key `max_image_age_sec` in `alpaca_config.json`.
+- Environment: `MAX_IMAGE_AGE_SEC` applies only until `alpaca_config.json` exists. Startup writes the full configuration to that file, and the file takes precedence afterwards. Once the file exists, use the setup page or edit the JSON key.
+
+Notes:
+
+- Set the limit higher than the camera's longest gap between frames plus `ALPACA_UPDATE_INTERVAL`. A lower value forces unsafe between normal image updates.
+- A camera that stops writing images, for example with daytime capture disabled, reads unsafe once the limit elapses. Raise the limit or set it to `0` if that is not the intended behaviour.
+- After a restart, the monitor does not report safe until the image has changed at least once since boot. With `max_image_age_sec` set to `0`, this startup requirement is also disabled.
+- If a detector does not supply an image hash (for example a model backend that lacks hash support), the image check is disabled and a warning is logged at startup. The detection failure check still applies.
+
+Both checks apply to the ASCOM `IsSafe` value, the dashboard, and the external REST API.
+
+Home Assistant behaviour while data is stale:
+
+- The Cloud Status, Confidence, and Detection Time sensors become `unavailable`. They use a second availability topic that reports `offline` when either check trips and `online` on the next successful detection.
+- The `Safe` binary sensor stays available and reads `OFF`. It follows `IsSafe` each cycle and reads `ON` only when the monitor reports safe.
+- Legacy MQTT mode publishes `is_safe` in the JSON payload only on successful detection cycles, so a consumer receives nothing while detections fail and must treat a missing update for more than 3 minutes as unsafe.
 
 ### Supported Software
 

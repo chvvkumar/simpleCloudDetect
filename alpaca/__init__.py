@@ -2,6 +2,7 @@
 Alpaca Package - ASCOM Alpaca SafetyMonitor
 """
 import os
+from dataclasses import fields
 from flask import Flask
 from flask_cors import CORS
 from .config import AlpacaConfig
@@ -22,7 +23,8 @@ def create_app():
         port=int(os.getenv('ALPACA_PORT', '11111')),
         device_number=int(os.getenv('ALPACA_DEVICE_NUMBER', '0')),
         detection_interval=int(os.getenv('DETECT_INTERVAL', '30')),
-        update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30'))
+        update_interval=int(os.getenv('ALPACA_UPDATE_INTERVAL', '30')),
+        max_image_age_sec=int(os.getenv('MAX_IMAGE_AGE_SEC', '600'))
     )
 
     # 2. Load from file and override environment settings if file exists
@@ -33,7 +35,11 @@ def create_app():
         # Update our base config with ONLY the values explicitly in the file
         for key, value in file_settings.items():
             setattr(alpaca_cfg, key, value)
-    
+    # A hand-edited JSON file may hold "300" for an int field; coerce once here
+    for f in fields(alpaca_cfg):
+        if f.type is int:
+            setattr(alpaca_cfg, f.name, int(getattr(alpaca_cfg, f.name)))
+
     # 3. Save the final configuration to ensure the file exists and is current
     alpaca_cfg.save_to_file()
     

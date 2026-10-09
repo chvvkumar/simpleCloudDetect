@@ -32,7 +32,7 @@ def test_first_detection_log_line(onnx_model_file, labels_file, rgb_image, caplo
     cfg = _config(onnx_model_file, labels_file)
     detector = CloudDetector(cfg, mqtt_client=None)
     with caplog.at_level(logging.INFO, logger="detect"):
-        with patch.object(detector, "_load_image", return_value=rgb_image):
+        with patch.object(detector, "_load_image", return_value=(rgb_image, "hash")):
             detector.detect()
             detector.detect()
     messages = [r.getMessage() for r in caplog.records]
@@ -42,7 +42,7 @@ def test_first_detection_log_line(onnx_model_file, labels_file, rgb_image, caplo
 def test_return_image_contains_independent_copy(onnx_model_file, labels_file, rgb_image):
     cfg = _config(onnx_model_file, labels_file)
     detector = CloudDetector(cfg, mqtt_client=None)
-    with patch.object(detector, "_load_image", return_value=rgb_image):
+    with patch.object(detector, "_load_image", return_value=(rgb_image, "hash")):
         result = detector.detect(return_image=True)
     assert "image" in result
     assert isinstance(result["image"], Image.Image)

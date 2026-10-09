@@ -120,7 +120,7 @@ class TestApplyRuntimeSettings(unittest.TestCase):
         with patch.object(AlpacaSafetyMonitor, '_setup_mqtt', return_value=new_client), \
              patch('alpaca.device.HADiscoveryManager') as ha_cls:
             monitor.apply_runtime_settings()
-        ha_cls.assert_called_once_with(monitor.detect_config, new_client)
+        ha_cls.assert_called_once_with(monitor.detect_config, new_client, safe_sensor=True)
         ha_cls.return_value.publish_discovery_configs.assert_called_once()
         self.assertIs(monitor.ha_discovery, ha_cls.return_value)
 
