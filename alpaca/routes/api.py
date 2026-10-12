@@ -53,19 +53,6 @@ def create_simple_get_endpoint(attribute_getter):
         ))
     return endpoint
 
-def client_is_safe() -> bool:
-    """IsSafe as reported to the calling Alpaca client.
-
-    Alpaca tracks Connected per client (IP + ClientID). A client that has not
-    connected is told False, matching the pre-connection behaviour ASCOM
-    clients have always seen from this driver. The detector itself keeps
-    running; monitor.is_safe() carries the real state for non-Alpaca consumers.
-    """
-    client_id, _ = monitor.get_client_params()
-    if not monitor.is_client_connected(request.remote_addr, client_id):
-        return False
-    return monitor.is_safe()
-
 @api_bp.route('/v1/safetymonitor/<int:device_number>/issafe', methods=['GET'])
 def get_issafe(device_number: int):
     """Get safety status"""
@@ -74,7 +61,7 @@ def get_issafe(device_number: int):
         return error_response
     _, client_tx_id = monitor.get_client_params()
     return jsonify(monitor.create_response(
-        value=client_is_safe(),
+        value=monitor.is_safe(),
         client_transaction_id=client_tx_id
     ))
 
@@ -200,7 +187,7 @@ def get_description(device_number: int):
 @api_bp.route('/v1/safetymonitor/<int:device_number>/devicestate', methods=['GET'])
 def get_devicestate(device_number: int):
     return create_simple_get_endpoint(
-        lambda: [{"Name": "IsSafe", "Value": client_is_safe()}]
+        lambda: [{"Name": "IsSafe", "Value": monitor.is_safe()}]
     )(device_number)
 
 @api_bp.route('/v1/safetymonitor/<int:device_number>/driverinfo', methods=['GET'])

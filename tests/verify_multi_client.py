@@ -139,30 +139,17 @@ def run_tests():
             
         log("Scenario B Passed")
 
-        # Scenario C: Per-client IsSafe gate
-        log("--- Scenario C: Per-client IsSafe gate ---")
-        # Ensure fully disconnected
+        # Scenario C: IsSafe readable without any connected client
+        log("--- Scenario C: IsSafe without connected client ---")
         if check_connected():
              log("FAIL: System should be disconnected")
              sys.exit(1)
 
-        log("Connecting Client A (ID 1)...")
-        connect(1)
-
-        is_safe_other = check_issafe(client_id=99)
-        log(f"Is Safe for unconnected Client 99? {is_safe_other}")
-        if is_safe_other:
-            log("FAIL: A client that never connected must see IsSafe=False")
+        is_safe = check_issafe(client_id=99)
+        log(f"Is Safe for unconnected Client 99? {is_safe}")
+        if is_safe is None:
+            log("FAIL: IsSafe must be readable without a connected client")
             sys.exit(1)
-
-        is_safe_a = check_issafe(client_id=1)
-        log(f"Is Safe for connected Client 1? {is_safe_a}")
-        if is_safe_a is None:
-            log("FAIL: Connected client could not read IsSafe")
-            sys.exit(1)
-
-        log("Disconnecting Client A...")
-        disconnect(1)
 
         log("Scenario C Passed")
         log("ALL TESTS PASSED")

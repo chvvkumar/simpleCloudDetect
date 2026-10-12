@@ -80,6 +80,9 @@ class AlpacaConfig:
     debounce_to_safe_sec: int = 60  # Wait time before switching from Unsafe → Safe
     debounce_to_unsafe_sec: int = 0  # Wait time before switching from Safe → Unsafe (immediate)
     
+    # Stale image fail-safe: force unsafe if the image is unchanged this long (0 = disabled)
+    max_image_age_sec: int = 600
+    
     # NTP and timezone settings
     ntp_server: str = field(default_factory=lambda: os.environ.get('NTP_SERVER', 'pool.ntp.org'))
     timezone: str = field(default_factory=lambda: os.environ.get('TZ', 'UTC'))

@@ -51,7 +51,8 @@ def get_status():
     return jsonify({
         "is_safe": is_safe,
         "safety_status": "Safe" if is_safe else "Unsafe",
-        "detection": detection
+        "detection": detection,
+        "image": monitor.get_image_status()
     })
 
 @external_api_bp.route('/api/ext/v1/config', methods=['GET'])

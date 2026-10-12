@@ -6,29 +6,10 @@ paho's loop_start() reconnects silently, so without an on_connect handler that
 republishes discovery, the device stays permanently unavailable in Home
 Assistant while its state topics keep updating.
 """
-import sys
-import types
 import unittest
 from unittest import mock
 
-# detect.py imports TensorFlow at module level. Stub it so this test runs
-# without the ML stack installed. Everything else is a real dependency.
-if 'tensorflow' not in sys.modules:
-    keras_models = types.ModuleType('tensorflow.keras.models')
-    keras_models.load_model = lambda *a, **k: None
-    keras = types.ModuleType('tensorflow.keras')
-    keras.models = keras_models
-    tf = types.ModuleType('tensorflow')
-    tf.keras = keras
-    sys.modules['tensorflow'] = tf
-    sys.modules['tensorflow.keras'] = keras
-    sys.modules['tensorflow.keras.models'] = keras_models
-    sys.modules['keras'] = keras
-    sys.modules['keras.models'] = keras_models
-
-sys.path.insert(0, '.')
-
-from alpaca.device import AlpacaSafetyMonitor  # noqa: E402
+from alpaca.device import AlpacaSafetyMonitor
 
 
 class FakeConfig:
